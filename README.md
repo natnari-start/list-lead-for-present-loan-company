@@ -26,3 +26,7 @@
 ## ความปลอดภัย
 
 ห้าม commit ข้อมูลลูกค้าจริง, Spreadsheet ID ภายใน, OAuth token, service-account key, `.env` หรือ credentials เข้าสู่ repository นี้ ซึ่งเป็น public repository ใช้ข้อมูลจำลองในการพัฒนาและทดสอบเท่านั้น
+
+## ตรวจสอบก่อน merge และก่อน Live
+
+GitHub Actions workflow `.github/workflows/appdeploy-preflight.yml` จะรัน `npm run verify:prelive` เมื่อ push เข้า branch นี้หรือเปิด Pull Request เข้า `main` โดยตรวจ Vite build, unit tests ของ mock storage และรูปแบบไฟล์ `tests/tests.json` ตามสัญญา AppDeploy ทั้งนี้ build ใน CI จะ externalize `@appdeploy/client` ซึ่ง AppDeploy จัดให้ตอน runtime จึงเป็น preflight build ไม่ใช่การยืนยัน production runtime ส่วน AppDeploy E2E จาก `tests/tests.json` จะรันในขั้น Deploy/QA ของ AppDeploy เท่านั้น

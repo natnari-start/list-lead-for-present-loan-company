@@ -1,4 +1,4 @@
-import type { CrmPart, CrmRecord, CrmStoragePort } from './storage-port';
+import type { CrmPart, CrmRecord, CrmStoragePort } from './storage-port.ts';
 
 /**
  * In-memory storage for isolated development and tests only.
