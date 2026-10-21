@@ -11,13 +11,17 @@ The deployed app currently uses AppDeploy's database. The attached workbook is a
 3. Choose an approved server-side authentication method for the app runtime and grant only the access required.
 4. Store credentials in the platform's encrypted secret store. Never put credentials, private Spreadsheet IDs, or customer rows in frontend code or this public repository.
 5. Back up the target sheet and validate a schema mapping with synthetic records before enabling writes.
-6. Define rollback and avoid dual-writing to AppDeploy DB and Sheets unless consistency handling is implemented and tested.
+6. Define rollback and avoid dual-writing to AppDeploy DB and Sheets unless consistency handling and reconciliation are implemented and tested.
 
 ## Schema observations
 
 The workbook contains: ทะเบียนลูกค้า (52 columns), เคสสินเชื่อ (16), ประวัติการติดต่อ (15), งานติดตาม (11), รายการเอกสาร (10), วิธีใช้ (2), and ข้อมูลนำเข้า_43210 (18).
 
-The AppDeploy snapshot's contact-history schema had 14 columns. This branch adds the missing final field, รายละเอียดธุรกิจจากการติดต่อ (JSON), and validates non-empty values as JSON. No workbook row values were copied.
+The AppDeploy snapshot's contact-history schema had 14 columns. The source-sync branch adds the missing final field, รายละเอียดธุรกิจจากการติดต่อ (JSON), and validates non-empty values as JSON. No workbook row values were copied.
+
+## Storage boundary
+
+`backend/storage-port.ts` defines a backend-neutral storage contract. `backend/mock-storage.ts` provides an in-memory implementation for synthetic tests only. The mock is not connected to production routes and does not persist data. The current backend still uses AppDeploy DB.
 
 ## Data relationships to preserve
 
