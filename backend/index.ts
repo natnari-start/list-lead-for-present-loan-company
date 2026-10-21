@@ -2,7 +2,6 @@ import {
   db,
   error,
   json,
-  secrets,
   requireAdminEmailAllowlist,
   type RouterMiddleware,
   requireAuth,
@@ -144,22 +143,11 @@ function validate(
     throw new Error('ไม่พบรหัสเคส');
 }
 
-const requireConfiguredAdmin: RouterMiddleware = async ctx => {
-  let adminEmails: string[] = [];
-  try {
-    adminEmails = (await secrets.readSecret('ADMIN_EMAILS'))
-      .split(/[\\s,;]+/)
-      .map(email => email.trim().toLowerCase())
-      .filter(Boolean);
-  } catch {
-    return error('ระบบยังไม่ได้ตั้งค่าสิทธิ์ผู้ดูแล', 503);
-  }
-  if (!adminEmails.length)
-    return error('ระบบยังไม่ได้ตั้งค่าสิทธิ์ผู้ดูแล', 503);
-  return requireAdminEmailAllowlist(adminEmails)(ctx);
-};
-
-const auth: RouterMiddleware[] = [requireAuth(), requireConfiguredAdmin];
+const ADMIN_EMAILS = ['chgfill@gmail.com'];
+const auth: RouterMiddleware[] = [
+  requireAuth(),
+  requireAdminEmailAllowlist(ADMIN_EMAILS),
+];
 
 export const handler = router({
   'GET /api/session': [...auth, async () => json({ authorized: true })],
