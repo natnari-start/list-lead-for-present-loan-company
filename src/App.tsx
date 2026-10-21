@@ -1,0 +1,637 @@
+import { useEffect, useMemo, useState } from 'react';
+import { api, auth } from '@appdeploy/client';
+import { schemas } from './schema';
+
+type Part = 'customers' | 'cases' | 'contacts' | 'tasks' | 'documents';
+type Row = { id: string; values: unknown[] };
+type Data = Record<Part, Row[]>;
+type Spec = {
+  key: Part;
+  sheetName: string;
+  headers: string[];
+  required: number[];
+  options: Record<string, string[]>;
+  dates: number[];
+  numbers: number[];
+  longText?: number[];
+};
+type User = { email?: string; name?: string };
+const specs = schemas as unknown as Spec[];
+const names: Record<Part, string> = {
+  customers: 'ทะเบียนลูกค้า',
+  cases: 'เคสสินเชื่อ',
+  contacts: 'ประวัติการติดต่อ',
+  tasks: 'งานติดตาม',
+  documents: 'รายการเอกสาร',
+};
+const columns: Record<Part, number[]> = {
+  customers: [0, 2, 5, 7, 14, 19],
+  cases: [0, 1, 3, 5, 7, 12, 13],
+  contacts: [0, 1, 2, 3, 4, 6],
+  tasks: [0, 1, 2, 3, 5, 7],
+  documents: [0, 1, 2, 4, 5],
+};
+const blankData = (): Data => ({
+  customers: [],
+  cases: [],
+  contacts: [],
+  tasks: [],
+  documents: [],
+});
+const isBlank = (value: unknown) =>
+  value === null || value === undefined || String(value).trim() === '';
+const localDate = () =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+const money = (value: unknown) =>
+  `${new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 }).format(Number(value) || 0)} บาท`;
+const escCsv = (value: unknown) => {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+@\-\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
+};
+const classifyTask = (row: unknown[], today: string) => {
+  if (!row[0]) return '';
+  if (row[7] === 'เสร็จแล้ว' || row[7] === 'ยกเลิก') return String(row[7]);
+  if (isBlank(row[5])) return 'ยังไม่กำหนดวัน';
+  const due = String(row[5]).slice(0, 10);
+  return due < today ? 'เกินกำหนด' : due === today ? 'วันนี้' : 'รอถึงกำหนด';
+};
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [part, setPart] = useState<Part>('customers');
+  const [data, setData] = useState<Data>(blankData());
+  const [query, setQuery] = useState('');
+  const [record, setRecord] = useState<Row | null>(null);
+  const [values, setValues] = useState<unknown[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.get('/api/data');
+      setData(response.data as Data);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'โหลดข้อมูลไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    auth
+      .getUser()
+      .then(async current => {
+        if (!current) return;
+        try {
+          await api.get('/api/session');
+          setUser(current);
+        } catch {
+          await auth.signOut();
+          setError('ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาตรวจการตั้งค่าผู้ดูแล');
+        }
+      })
+      .catch(() => setError('เข้าสู่ระบบไม่สำเร็จ'));
+  }, []);
+  useEffect(() => {
+    if (user) void load();
+  }, [user]);
+
+  const spec = specs.find(item => item.key === part)!;
+  const visibleRows = useMemo(
+    () =>
+      (data[part] || []).filter(
+        row =>
+          !query ||
+          row.values.some(v =>
+            String(v ?? '')
+              .toLowerCase()
+              .includes(query.toLowerCase())
+          )
+      ),
+    [data, part, query]
+  );
+  const today = localDate();
+  const customerCount = data.customers.filter(
+    row => row.values[19] !== 'เก็บถาวร'
+  ).length;
+  const requested = data.cases.reduce(
+    (sum, row) => sum + (Number(row.values[5]) || 0),
+    0
+  );
+  const approved = data.cases.reduce(
+    (sum, row) => sum + (Number(row.values[12]) || 0),
+    0
+  );
+  const disbursed = data.cases.reduce(
+    (sum, row) => sum + (Number(row.values[13]) || 0),
+    0
+  );
+  const dueToday = data.tasks.filter(
+    row => classifyTask(row.values, today) === 'วันนี้'
+  ).length;
+  const overdue = data.tasks.filter(
+    row => classifyTask(row.values, today) === 'เกินกำหนด'
+  ).length;
+  const casesWithoutTask = data.cases.filter(
+    loan =>
+      !data.tasks.some(
+        task =>
+          task.values[2] === loan.values[0] &&
+          !['เสร็จแล้ว', 'ยกเลิก'].includes(String(task.values[7]))
+      )
+  ).length;
+
+  const beginAdd = () => {
+    const initial = spec.headers.map((_, index) => {
+      if (index === 0)
+        return `${part.slice(0, -1).toUpperCase()}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+      if (part === 'customers' && index === 19) return 'ใช้งาน';
+      if (
+        (spec.dates || []).includes(index) &&
+        (spec.required || []).includes(index)
+      )
+        return localDate();
+      return null;
+    });
+    setRecord(null);
+    setValues(initial);
+    setError('');
+  };
+  const beginEdit = (row: Row) => {
+    setRecord(row);
+    setValues([...row.values]);
+    setError('');
+  };
+  const setField = (index: number, value: string) =>
+    setValues(current =>
+      current.map((old, i) =>
+        i === index ? (value === '' ? null : value) : old
+      )
+    );
+  const relation = (index: number): 'customer' | 'case' | null => {
+    if (
+      (part === 'cases' || part === 'contacts' || part === 'tasks') &&
+      index === 1
+    )
+      return 'customer';
+    if (
+      ((part === 'contacts' || part === 'tasks') && index === 2) ||
+      (part === 'documents' && index === 1)
+    )
+      return 'case';
+    return null;
+  };
+  const makeFormControl = (index: number) => {
+    const value =
+      values[index] === null || values[index] === undefined
+        ? ''
+        : String(values[index]);
+    const relationType = relation(index);
+    if (relationType === 'customer')
+      return (
+        <select
+          value={value}
+          onChange={event => {
+            setField(index, event.target.value);
+            if (part !== 'cases' && index === 1) setField(2, '');
+          }}
+        >
+          <option value="">— เลือกลูกค้า —</option>
+          {data.customers.map(item => (
+            <option key={item.id} value={String(item.values[0])}>
+              {String(item.values[2] || item.id)} ({item.id})
+            </option>
+          ))}
+        </select>
+      );
+    if (relationType === 'case') {
+      const customerId = part === 'documents' ? null : values[1];
+      const cases = data.cases.filter(
+        item =>
+          customerId === null || String(item.values[1]) === String(customerId)
+      );
+      return (
+        <select
+          value={value}
+          onChange={event => setField(index, event.target.value)}
+        >
+          <option value="">— ไม่ระบุเคส —</option>
+          {cases.map(item => (
+            <option key={item.id} value={String(item.values[0])}>
+              {item.id} · {customerName(data, item.values[1])}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    const choices = spec.options?.[String(index)];
+    if (choices)
+      return (
+        <select
+          value={value}
+          onChange={event => setField(index, event.target.value)}
+        >
+          <option value="">— ยังไม่ระบุ —</option>
+          {choices.map(choice => (
+            <option key={choice} value={choice}>
+              {choice}
+            </option>
+          ))}
+          {part === 'customers' &&
+            index === 5 &&
+            value &&
+            !choices.includes(value) && <option value={value}>{value}</option>}
+        </select>
+      );
+    if (spec.numbers?.includes(index))
+      return (
+        <input
+          type="number"
+          step="any"
+          value={value}
+          placeholder="กรอกตัวเลข"
+          onChange={event => setField(index, event.target.value)}
+        />
+      );
+    if (spec.dates?.includes(index))
+      return (
+        <input
+          type="date"
+          value={value}
+          onChange={event => setField(index, event.target.value)}
+        />
+      );
+    if (spec.longText?.includes(index) || spec.headers[index].length > 38)
+      return (
+        <textarea
+          value={value}
+          placeholder={`กรอก${spec.headers[index]}`}
+          onChange={event => setField(index, event.target.value)}
+        />
+      );
+    return (
+      <input
+        value={value}
+        readOnly={index === 0 && !!record}
+        placeholder={`กรอก${spec.headers[index]}`}
+        onChange={event => setField(index, event.target.value)}
+      />
+    );
+  };
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const normalized = values.map((value, index) =>
+        isBlank(value)
+          ? null
+          : spec.numbers.includes(index)
+            ? Number(value)
+            : String(value)
+      );
+      const response = record
+        ? await api.put(
+            `/api/records/${part}/${encodeURIComponent(record.id)}`,
+            { values: normalized }
+          )
+        : await api.post('/api/records', { part, values: normalized });
+      setData(response.data.data as Data);
+      setRecord(null);
+      setValues([]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'บันทึกไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function archive(row: Row) {
+    if (
+      !window.confirm('เก็บถาวรบริษัทนี้? เคสและประวัติที่เชื่อมโยงจะยังอยู่')
+    )
+      return;
+    const updated = [...row.values];
+    updated[19] = 'เก็บถาวร';
+    updated[22] = today;
+    try {
+      const response = await api.put(
+        `/api/records/customers/${encodeURIComponent(row.id)}`,
+        { values: updated }
+      );
+      setData(response.data.data as Data);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'เก็บถาวรไม่สำเร็จ');
+    }
+  }
+
+  async function remove(row: Row) {
+    if (!window.confirm('ยืนยันลบรายการนี้? รายการที่ลบจะกู้คืนไม่ได้')) return;
+    try {
+      const response = await api.delete(
+        `/api/records/${part}/${encodeURIComponent(row.id)}`
+      );
+      setData(response.data.data as Data);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'ลบไม่สำเร็จ');
+    }
+  }
+
+  function exportCsv() {
+    const lines = [
+      spec.headers.map(escCsv).join(','),
+      ...visibleRows.map(row => row.values.map(escCsv).join(',')),
+    ];
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(
+      new Blob(['\uFEFF', lines.join('\r\n')], {
+        type: 'text/csv;charset=utf-8',
+      })
+    );
+    link.download = `${names[part]}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  async function signIn() {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await auth.signIn({ scope: 'openid email profile' });
+      await api.get('/api/session');
+      setUser(result.user);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'เข้าสู่ระบบไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!user)
+    return (
+      <main className="login">
+        <section className="login-card">
+          <div className="brand-mark">SF</div>
+          <p className="eyebrow">PRIVATE WORKSPACE</p>
+          <h1>SME Freedom Desk</h1>
+          <p className="muted">ระบบติดตามลูกค้าและงานสินเชื่อ · Sandbox</p>
+          <button
+            className="button primary large"
+            onClick={signIn}
+            disabled={loading}
+          >
+            เข้าสู่ระบบด้วย Google
+          </button>
+          {error && <p className="error">{error}</p>}
+          <p className="small-note">
+            อนุญาตเฉพาะบัญชีเจ้าของ ระบบ Sandbox นี้แยกข้อมูลจาก Google Sheets
+          </p>
+        </section>
+      </main>
+    );
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div>
+          <div className="brand">
+            SME Freedom <span>DESK</span>
+          </div>
+          <small>Private demo · {user.name || user.email}</small>
+        </div>
+        <button
+          className="button ghost"
+          onClick={() => {
+            auth.signOut();
+            setUser(null);
+          }}
+        >
+          ออกจากระบบ
+        </button>
+      </header>
+      <main className="main">
+        <section className="heading">
+          <div>
+            <p className="eyebrow">CUSTOMER RELATIONSHIP</p>
+            <h1>ติดตามลูกค้าและงานสินเชื่อ</h1>
+            <p className="muted">
+              Sandbox สำหรับข้อมูลจำลอง · ไม่เชื่อมต่อชีตต้นฉบับ
+            </p>
+          </div>
+        </section>
+        <section className="stats">
+          <Stat label="ลูกค้าใช้งาน" value={customerCount} />
+          <Stat
+            label="งานวันนี้ / เกินกำหนด"
+            value={`${dueToday} / ${overdue}`}
+          />
+          <Stat label="วงเงินที่ขอ" value={money(requested)} />
+          <Stat
+            label="อนุมัติ / เบิกจ่าย"
+            value={`${money(approved)} / ${money(disbursed)}`}
+          />
+        </section>
+        <section className="status-line">
+          <b>เคสที่ยังไม่มีงานถัดไป</b>
+          <span>{casesWithoutTask}</span>
+          <small>จำนวนเคสแยกจากจำนวนลูกค้า · นับลูกค้าจากรหัสไม่ซ้ำ</small>
+        </section>
+        <nav className="tabs">
+          {specs.map(item => (
+            <button
+              className={part === item.key ? 'selected' : ''}
+              key={item.key}
+              onClick={() => {
+                setPart(item.key);
+                setQuery('');
+              }}
+            >
+              {names[item.key]} <span>{data[item.key]?.length || 0}</span>
+            </button>
+          ))}
+        </nav>
+        <section className="section-heading">
+          <div>
+            <h2>{names[part]}</h2>
+            <small>{data[part]?.length || 0} รายการ</small>
+          </div>
+          <div className="actions">
+            <button className="button" onClick={exportCsv}>
+              Export CSV
+            </button>
+            <button
+              className="button"
+              onClick={() => void load()}
+              disabled={loading}
+            >
+              รีเฟรช
+            </button>
+            <button className="button primary" onClick={beginAdd}>
+              ＋ เพิ่มรายการ
+            </button>
+          </div>
+        </section>
+        <input
+          className="search"
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          placeholder={`ค้นหา${names[part]}`}
+        />
+        {error && (
+          <div className="error-banner">
+            {error}
+            <button onClick={() => setError('')}>ปิด</button>
+          </div>
+        )}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                {columns[part].map(index => (
+                  <th key={index}>{spec.headers[index]}</th>
+                ))}
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map(row => (
+                <tr key={row.id}>
+                  {columns[part].map(index => (
+                    <td key={index}>
+                      {displayValue(part, index, row.values[index], data)}
+                    </td>
+                  ))}
+                  <td className="row-actions">
+                    <button onClick={() => beginEdit(row)}>แก้ไข</button>
+                    {part === 'customers' ? (
+                      <button onClick={() => void archive(row)}>
+                        เก็บถาวร
+                      </button>
+                    ) : (
+                      <button
+                        className="danger-text"
+                        onClick={() => void remove(row)}
+                      >
+                        ลบ
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!visibleRows.length && (
+                <tr>
+                  <td colSpan={columns[part].length + 1} className="empty">
+                    {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </main>
+      {values.length > 0 && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setValues([]);
+          }}
+        >
+          <form className="modal" onSubmit={save}>
+            <div className="modal-head">
+              <div>
+                <small className="eyebrow">
+                  {record ? 'EDIT RECORD' : 'NEW RECORD'}
+                </small>
+                <h2>
+                  {record ? 'แก้ไข' : 'เพิ่ม'}
+                  {names[part]}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="button"
+                onClick={() => setValues([])}
+              >
+                ปิด
+              </button>
+            </div>
+            <div className="form-grid">
+              {spec.headers.map((header, index) => (
+                <label className={header.length > 38 ? 'wide' : ''} key={index}>
+                  <span>
+                    {header}
+                    {spec.required.includes(index) && (
+                      <b className="required"> *</b>
+                    )}
+                  </span>
+                  {makeFormControl(index)}
+                </label>
+              ))}
+            </div>
+            <p className="small-note">
+              ช่องที่ไม่มีเครื่องหมาย * เว้นว่างได้
+              การเปลี่ยนรายละเอียดการติดต่อจะไม่เขียนทับทะเบียนลูกค้า
+            </p>
+            {error && <div className="error-banner">{error}</div>}
+            <div className="modal-foot">
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  setRecord(null);
+                  setValues([]);
+                }}
+              >
+                ยกเลิก
+              </button>
+              <button
+                className="button primary"
+                type="submit"
+                disabled={loading}
+              >
+                {loading ? 'กำลังบันทึก…' : 'บันทึก'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function customerName(data: Data, id: unknown) {
+  return (
+    data.customers.find(row => String(row.values[0]) === String(id))
+      ?.values[2] ||
+    id ||
+    ''
+  );
+}
+function displayValue(part: Part, index: number, value: unknown, data: Data) {
+  if (value === null || value === undefined) return '—';
+  if (
+    (part === 'cases' || part === 'contacts' || part === 'tasks') &&
+    index === 1
+  )
+    return customerName(data, value);
+  if ((part === 'contacts' || part === 'tasks') && index === 2 && value)
+    return String(value);
+  return String(value);
+}
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <article className="stat">
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </article>
+  );
+}

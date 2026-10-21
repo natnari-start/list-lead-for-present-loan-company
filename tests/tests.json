@@ -1,0 +1,79 @@
+[
+  {
+    "name": "Google login and customer create edit retention",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": [
+      "Google authentication",
+      "email allowlist",
+      "GET /api/data",
+      "POST /api/records",
+      "PUT /api/records/:part/:id",
+      "customer create and edit",
+      "persistence after reload"
+    ],
+    "description": "Signs in as the authorized owner, creates a customer, edits its business category, and verifies durable data.",
+    "steps": [
+      "Sign in with the authorized Google account",
+      "Open the customer register and add a company with a lead source",
+      "Edit the company business category",
+      "Refresh the page and search for the company"
+    ],
+    "expected": "The edited company remains visible after refresh, and the business category matches the saved value."
+  },
+  {
+    "name": "One customer can have multiple loan cases",
+    "viewport": "desktop",
+    "covers": [
+      "customer to case relationship",
+      "multiple cases per customer",
+      "unique lead count",
+      "case requested amount dashboard"
+    ],
+    "description": "Creates a customer and two linked loan cases and confirms the customer remains counted once.",
+    "steps": [
+      "Create a customer with a lead source",
+      "Create two SME Freedom cases linked to that company",
+      "Open the loan case list and dashboard"
+    ],
+    "expected": "Both cases show the same company, while the dashboard counts one customer and keeps case amounts in the case totals."
+  },
+  {
+    "name": "Contact history and follow-up remain linked",
+    "viewport": "mobile",
+    "covers": [
+      "contact create",
+      "task create",
+      "customer and case linking",
+      "due today task summary",
+      "history retained"
+    ],
+    "description": "Adds a contact note and a due-today task for a linked case and verifies both in their sections.",
+    "steps": [
+      "Create a customer and a linked SME Freedom case",
+      "Add a contact-history entry for the company and case",
+      "Add a follow-up task due today for the same case",
+      "Open contact history and follow-up tasks"
+    ],
+    "expected": "The contact entry and task appear under the selected company, and the task is counted as due today."
+  },
+  {
+    "name": "Protect linked records and export filtered data",
+    "viewport": "desktop",
+    "covers": [
+      "DELETE /api/records/:part/:id",
+      "linked case delete guard",
+      "CSV export",
+      "formula injection protection",
+      "logout"
+    ],
+    "description": "Confirms a linked case cannot be removed accidentally, exports a CSV, and signs out.",
+    "steps": [
+      "Create a company, a linked case, and a document record",
+      "Attempt to delete the linked case",
+      "Export the document list to CSV",
+      "Sign out"
+    ],
+    "expected": "The linked case is preserved with a clear explanation, the CSV downloads without executable formulas, and the app returns to its login screen."
+  }
+]

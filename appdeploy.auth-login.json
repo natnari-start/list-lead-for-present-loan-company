@@ -1,0 +1,14 @@
+{
+  "methods": ["google"],
+  "headline": "SME Freedom Desk",
+  "subtitle": "เข้าสู่ระบบด้วยบัญชี Google ที่ได้รับอนุญาต",
+  "style": {
+    "mode": "light",
+    "accentColor": "#164e82",
+    "backgroundColor": "#f4f6f9",
+    "panelColor": "#ffffff",
+    "textColor": "#17212f",
+    "fontFamily": "IBM Plex Sans Thai, system-ui, sans-serif",
+    "borderRadius": 14
+  }
+}
