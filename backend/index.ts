@@ -1,261 +1,189 @@
 import {
-  db,
   error,
   json,
   requireAdminEmailAllowlist,
   type RouterMiddleware,
   requireAuth,
   router,
+  secrets,
 } from '@appdeploy/sdk';
 import { schemas } from '../src/schema';
+import { describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
-const PARTS = ['customers', 'cases', 'contacts', 'tasks', 'documents'] as const;
-type Part = (typeof PARTS)[number];
-type Spec = {
+type SheetSpec = {
   key: string;
+  sheetName: string;
   headers: string[];
-  required: number[];
-  options: Record<string, string[]>;
-  numbers: number[];
-  signedNumbers: number[];
-  dates: number[];
-  jsonFields?: number[];
+  dates?: number[];
+  numbers?: number[];
+  required?: number[];
+  options?: Record<string, string[]>;
 };
-type StoredRecord = { values: unknown[] };
-type Data = Record<Part, Array<StoredRecord & { id: string }>>;
-const SPECS = schemas as unknown as Spec[];
 
-function safeTable(part: Part, userId: string): string {
-  const safeId = userId.replace(/[^A-Za-z0-9_]/g, '_');
-  return `crm_${part}_${safeId}`;
-}
-
-function getSpec(part: unknown): Spec | null {
-  return typeof part === 'string'
-    ? SPECS.find(spec => spec.key === part) || null
-    : null;
-}
-
-async function listPart(
-  part: Part,
-  userId: string
-): Promise<Array<StoredRecord & { id: string }>> {
-  const result = await db.list<StoredRecord>(safeTable(part, userId), {
-    limit: 500,
-  });
-  return result.items.map(item => ({ id: item.id, values: item.values }));
-}
-
-async function loadData(userId: string): Promise<Data> {
-  const lists = await Promise.all(PARTS.map(part => listPart(part, userId)));
-  return Object.fromEntries(
-    PARTS.map((part, index) => [part, lists[index]])
-  ) as Data;
-}
-
-function normalize(spec: Spec, raw: unknown): unknown[] {
-  if (!Array.isArray(raw) || raw.length !== spec.headers.length)
-    throw new Error('จำนวนช่องข้อมูลไม่ตรงกับแบบฟอร์ม');
-  return raw.map((value, index) => {
-    if (value === null || value === undefined || value === '') return null;
-    if (spec.numbers.includes(index)) {
-      const number = Number(value);
-      if (!Number.isFinite(number))
-        throw new Error(`ตัวเลขไม่ถูกต้อง: ${spec.headers[index]}`);
-      if (!spec.signedNumbers.includes(index) && number < 0)
-        throw new Error(`ตัวเลขต้องไม่ติดลบ: ${spec.headers[index]}`);
-      return number;
+const SPECS = schemas as unknown as SheetSpec[];
+const adminAllowlist: RouterMiddleware = async (ctx) => {
+  let allowedEmails: string[];
+  try {
+    const raw = await secrets.readSecret('ADMIN_EMAILS');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = raw.split(/[,\r\n]/).map(value => value.trim()).filter(Boolean);
     }
-    if (spec.jsonFields?.includes(index)) {
-      try {
-        JSON.parse(String(value));
-      } catch {
-        throw new Error(`รูปแบบ JSON ไม่ถูกต้อง: ${spec.headers[index]}`);
-      }
-    }
-    return String(value);
-  });
-}
-
-function validate(
-  part: Part,
-  spec: Spec,
-  values: unknown[],
-  data: Data,
-  editing: boolean
-): void {
-  for (const index of spec.required)
-    if (values[index] === null || String(values[index] ?? '').trim() === '')
-      throw new Error(`กรุณากรอก ${spec.headers[index]}`);
-  for (const [key, choices] of Object.entries(spec.options || {})) {
-    const index = Number(key);
-    if (
-      values[index] !== null &&
-      !choices.includes(String(values[index])) &&
-      !(part === 'customers' && index === 5)
-    )
-      throw new Error(`ค่าที่เลือกไม่ถูกต้อง: ${spec.headers[index]}`);
+    allowedEmails = Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+      : typeof parsed === 'string' && parsed.trim() ? [parsed.trim()] : [];
+  } catch {
+    return error('ยังไม่ได้ตั้งค่า ADMIN_EMAILS ใน AppDeploy secrets', 503);
   }
-  for (const index of spec.dates || [])
-    if (
-      values[index] !== null &&
-      !/^\d{4}-\d{2}-\d{2}$/.test(String(values[index]))
-    )
-      throw new Error(`วันที่ไม่ถูกต้อง: ${spec.headers[index]}`);
-  if (
-    part === 'customers' &&
-    values[24] !== null &&
-    !/^\d{13}$/.test(String(values[24]))
-  )
-    throw new Error('เลขทะเบียนนิติบุคคลต้องมี 13 หลัก');
-  if (
-    !editing &&
-    data[part].some(record => String(record.values[0]) === String(values[0]))
-  )
-    throw new Error('รหัสนี้มีอยู่แล้ว');
-  if (
-    part === 'cases' &&
-    !data.customers.some(
-      record => String(record.values[0]) === String(values[1])
-    )
-  )
-    throw new Error('ไม่พบรหัสลูกค้า');
-  if (part === 'contacts' || part === 'tasks') {
-    if (
-      !data.customers.some(
-        record => String(record.values[0]) === String(values[1])
-      )
-    )
-      throw new Error('ไม่พบรหัสลูกค้า');
-    if (values[2] !== null) {
-      const linked = data.cases.find(
-        record => String(record.values[0]) === String(values[2])
-      );
-      if (!linked) throw new Error('ไม่พบรหัสเคส');
-      if (String(linked.values[1]) !== String(values[1]))
-        throw new Error('ลูกค้าไม่ตรงกับเคส');
-    }
-  }
-  if (
-    part === 'documents' &&
-    !data.cases.some(record => String(record.values[0]) === String(values[1]))
-  )
-    throw new Error('ไม่พบรหัสเคส');
-}
-
-const ADMIN_EMAILS = ['chgfill@gmail.com'];
-const auth: RouterMiddleware[] = [
-  requireAuth(),
-  requireAdminEmailAllowlist(ADMIN_EMAILS),
-];
+  if (!allowedEmails.length) return error('ADMIN_EMAILS ไม่มีบัญชีผู้ดูแลที่ถูกต้อง', 503);
+  return requireAdminEmailAllowlist(allowedEmails)(ctx);
+};
+const auth: RouterMiddleware[] = [requireAuth(), adminAllowlist];
 
 export const handler = router({
   'GET /api/session': [...auth, async () => json({ authorized: true })],
+  'GET /api/integration/google-sheets/status': [
+    ...auth,
+    async () => {
+      try {
+        const secretNames = await secrets.listSecretNames();
+        if (!secretNames.includes('GOOGLE_SERVICE_ACCOUNT_JSON') || !secretNames.includes('GOOGLE_SPREADSHEET_ID')) {
+          return json({ configured: false, connected: false });
+        }
+        return json(await inspectGoogleSheets(SPECS));
+      } catch (cause) {
+        const failure = describeGoogleSheetsFailure(cause);
+        console.warn('google_sheets_status_check_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
+        return json({
+          configured: true,
+          connected: false,
+          errorCode: failure.code,
+          errorMessage: failure.message,
+        });
+      }
+    },
+  ],
   'GET /api/data': [
     ...auth,
-    async ctx => {
+    async () => {
       try {
-        return json(await loadData(ctx.user!.userId));
+        const secretNames = await secrets.listSecretNames();
+        if (!secretNames.includes('GOOGLE_SERVICE_ACCOUNT_JSON') || !secretNames.includes('GOOGLE_SPREADSHEET_ID')) {
+          return error('ยังไม่ได้ตั้งค่า Google Sheets credential', 503);
+        }
+        return json(await loadGoogleSheetsData(SPECS));
       } catch (cause) {
-        console.error('load_data_failed', cause);
-        return error('โหลดข้อมูลไม่สำเร็จ', 500);
+        const failure = describeGoogleSheetsFailure(cause);
+        console.warn('google_sheets_data_load_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
+        return error(failure.message + ' ระบบไม่ได้แสดงข้อมูล Sandbox แทน', 502);
       }
     },
   ],
   'POST /api/records': [
     ...auth,
-    async ctx => {
-      try {
-        const body = ctx.body as { part?: unknown; values?: unknown };
-        const spec = getSpec(body?.part);
-        if (!spec) return error('ไม่พบประเภทข้อมูล');
-        const part = spec.key as Part;
-        const values = normalize(spec, body.values);
-        const userId = ctx.user!.userId;
-        const data = await loadData(userId);
-        validate(part, spec, values, data, false);
-        const id = String(values[0]);
-        const [createdId] = await db.tx.add(safeTable(part, userId), [
-          { id, values },
-        ]);
-        if (!createdId) return error('รหัสนี้มีอยู่แล้ว', 409);
-        return json({ data: await loadData(userId) }, 201);
-      } catch (cause) {
-        console.warn('create_record_rejected', cause);
-        return error(
-          cause instanceof Error ? cause.message : 'บันทึกไม่สำเร็จ',
-          400
-        );
-      }
-    },
+    async () => error('รุ่นนี้เปิด Google Sheets แบบอ่านอย่างเดียว', 405),
   ],
+
   'PUT /api/records/:part/:id': [
     ...auth,
-    async ctx => {
+    async ({ body, params }) => {
+      const spec = SPECS.find(item => item.key === params.part);
+      if (!spec) return error('ไม่พบประเภทข้อมูลที่ต้องการแก้ไข', 404);
+      const payload = body as { values?: unknown; expectedValues?: unknown } | null;
+      if (!payload || !Array.isArray(payload.values) || !Array.isArray(payload.expectedValues) ||
+        payload.values.length !== spec.headers.length || payload.expectedValues.length !== spec.headers.length) {
+        return error('ข้อมูลแก้ไขไม่ครบหรือไม่ตรงกับโครงสร้างชีต', 400);
+      }
+      const values = payload.values as unknown[];
+      const expectedValues = payload.expectedValues as unknown[];
+      const id = params.id;
+      if (String(values[0] ?? '') !== id || String(expectedValues[0] ?? '') !== id) {
+        return error('รหัสรายการแก้ไขไม่ได้', 400);
+      }
+      if (values.some(value => value !== null && typeof value !== 'string' && typeof value !== 'number')) {
+        return error('รูปแบบข้อมูลบางช่องไม่ถูกต้อง', 400);
+      }
+      if (values.some(value => typeof value === 'string' && value.length > 20000)) {
+        return error('ข้อมูลบางช่องยาวเกินขีดจำกัด', 400);
+      }
+      const changed = (index: number) =>
+        JSON.stringify(values[index] ?? null) !== JSON.stringify(expectedValues[index] ?? null);
+      const formulaColumns = spec.key === 'tasks' ? [9] : [];
+      if (formulaColumns.some(changed)) return error('ช่องคำนวณอัตโนมัติแก้ไขไม่ได้', 400);
+      for (const index of spec.required || []) {
+        if (changed(index) && (values[index] === null || String(values[index] ?? '').trim() === '')) {
+          return error('กรุณากรอกข้อมูลที่จำเป็น: ' + spec.headers[index], 400);
+        }
+      }
+      for (const [indexText, choices] of Object.entries(spec.options || {})) {
+        const index = Number(indexText);
+        const value = values[index];
+        if (changed(index) && value !== null && String(value) !== '' && !choices.includes(String(value))) {
+          return error('ค่าของช่อง ' + spec.headers[index] + ' ไม่อยู่ในรายการที่กำหนด', 400);
+        }
+      }
+      for (const index of spec.dates || []) {
+        const value = values[index];
+        if (changed(index) && value !== null && value !== '' &&
+          !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?$/.test(String(value))) {
+          return error('รูปแบบวันที่ไม่ถูกต้อง: ' + spec.headers[index], 400);
+        }
+      }
+      for (const index of spec.numbers || []) {
+        const value = values[index];
+        if (changed(index) && value !== null && value !== '' && !Number.isFinite(Number(value))) {
+          return error('กรุณากรอกตัวเลขที่ถูกต้อง: ' + spec.headers[index], 400);
+        }
+      }
+
       try {
-        const spec = getSpec(ctx.params.part);
-        if (!spec) return error('ไม่พบประเภทข้อมูล');
-        const part = spec.key as Part,
-          userId = ctx.user!.userId,
-          id = ctx.params.id;
-        const table = safeTable(part, userId);
-        const [existing] = await db.get<StoredRecord>(table, [id], {
-          consistent: true,
-        });
-        if (!existing) return error('ไม่พบรายการเดิม', 404);
-        const values = normalize(
-          spec,
-          (ctx.body as { values?: unknown })?.values
-        );
-        if (String(values[0]) !== id) return error('ห้ามเปลี่ยนรหัสรายการ');
-        const data = await loadData(userId);
-        validate(part, spec, values, data, true);
-        const [updated] = await db.tx.update(table, [
-          { id, record: { values } },
-        ]);
-        if (!updated) return error('แก้ไขไม่สำเร็จ', 409);
-        return json({ data: await loadData(userId) });
+        const current = await loadGoogleSheetsData(SPECS);
+        const rows = current[spec.key] || [];
+        if (!rows.some(row => row.id === id)) return error('ไม่พบรายการนี้ใน Google Sheets', 404);
+
+        if (spec.key === 'customers') {
+          const registrationIndex = 24;
+          const registration = String(values[registrationIndex] ?? '').trim();
+          if (changed(registrationIndex) && registration && rows.some(row =>
+            row.id !== id && String(row.values[registrationIndex] ?? '').trim() === registration
+          )) {
+            return error('เลขทะเบียนนิติบุคคลนี้ซ้ำกับรายการอื่น กรุณาตรวจสอบก่อนบันทึก', 409);
+          }
+        }
+        if (spec.key === 'cases' || spec.key === 'contacts' || spec.key === 'tasks') {
+          const customerId = String(values[1] ?? '');
+          if (changed(1) && !current.customers.some(row => row.id === customerId)) {
+            return error('กรุณาเลือกลูกค้าที่มีอยู่ในทะเบียน', 400);
+          }
+        }
+        if ((spec.key === 'contacts' || spec.key === 'tasks') && changed(2) && values[2]) {
+          const caseRow = current.cases.find(row => row.id === String(values[2]));
+          if (!caseRow || String(caseRow.values[1]) !== String(values[1])) {
+            return error('เคสที่เลือกไม่ตรงกับลูกค้า', 400);
+          }
+        }
+        if (spec.key === 'documents' && changed(1)) {
+          const caseRow = current.cases.find(row => row.id === String(values[1]));
+          if (!caseRow) return error('กรุณาเลือกเคสที่มีอยู่', 400);
+        }
+
+        await updateGoogleSheetsRecord(SPECS, spec.key, id, expectedValues, values);
+        return json({ data: await loadGoogleSheetsData(SPECS), updated: true });
       } catch (cause) {
-        console.warn('update_record_rejected', cause);
-        return error(
-          cause instanceof Error ? cause.message : 'แก้ไขไม่สำเร็จ',
-          400
-        );
+        if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
+        const failure = describeGoogleSheetsFailure(cause);
+        console.warn('google_sheets_update_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
+        const message = failure.status === 403
+          ? 'บันทึกไม่สำเร็จ: กรุณาตั้งสิทธิ์ service account เป็น Editor ใน Google Sheet'
+          : failure.message;
+        return error(message, failure.status === 403 ? 403 : 502);
       }
     },
   ],
   'DELETE /api/records/:part/:id': [
     ...auth,
-    async ctx => {
-      try {
-        const spec = getSpec(ctx.params.part);
-        if (!spec) return error('ไม่พบประเภทข้อมูล');
-        const part = spec.key as Part;
-        if (part === 'customers')
-          return error(
-            'ไม่ลบทะเบียนลูกค้าโดยตรง กรุณาเปลี่ยนเป็นเก็บถาวร',
-            409
-          );
-        const userId = ctx.user!.userId,
-          id = ctx.params.id,
-          data = await loadData(userId);
-        if (
-          part === 'cases' &&
-          (data.contacts.some(r => String(r.values[2]) === id) ||
-            data.tasks.some(r => String(r.values[2]) === id) ||
-            data.documents.some(r => String(r.values[1]) === id))
-        )
-          return error(
-            'ลบเคสไม่ได้เพราะมีประวัติ งาน หรือเอกสารเชื่อมโยงอยู่',
-            409
-          );
-        const [deleted] = await db.delete(safeTable(part, userId), [id]);
-        if (!deleted) return error('ไม่พบรายการ', 404);
-        return json({ data: await loadData(userId) });
-      } catch (cause) {
-        console.warn('delete_record_rejected', cause);
-        return error('ลบรายการไม่สำเร็จ', 400);
-      }
-    },
+    async () => error('รุ่นนี้เปิด Google Sheets แบบอ่านอย่างเดียว', 405),
   ],
 });

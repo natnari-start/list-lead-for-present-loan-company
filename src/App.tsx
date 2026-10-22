@@ -70,7 +70,12 @@ export default function App() {
   const [record, setRecord] = useState<Row | null>(null);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sheetStatus, setSheetStatus] = useState<
+    'checking' | 'connected' | 'mismatch' | 'error'
+  >('checking');
+  const [sheetMessage, setSheetMessage] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -79,7 +84,8 @@ export default function App() {
       const response = await api.get('/api/data');
       setData(response.data as Data);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'โหลดข้อมูลไม่สำเร็จ');
+      const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(responseMessage || (cause instanceof Error ? cause.message : 'โหลดข้อมูลไม่สำเร็จ'));
     } finally {
       setLoading(false);
     }
@@ -101,7 +107,33 @@ export default function App() {
       .catch(() => setError('เข้าสู่ระบบไม่สำเร็จ'));
   }, []);
   useEffect(() => {
-    if (user) void load();
+    if (!user) return;
+    void load();
+    api
+      .get('/api/integration/google-sheets/status')
+      .then(response => {
+        const status = response.data as {
+          connected?: boolean;
+          errorCode?: string;
+          errorMessage?: string;
+          checkedSheets?: Array<{ headersMatch: boolean }>;
+        };
+        const headersMismatch = status.checkedSheets?.some(sheet => !sheet.headersMatch);
+        setSheetStatus(
+          status.connected
+            ? 'connected'
+            : status.errorCode
+              ? 'error'
+              : headersMismatch
+                ? 'mismatch'
+                : 'error'
+        );
+        setSheetMessage(status.errorMessage || '');
+      })
+      .catch(() => {
+        setSheetStatus('error');
+        setSheetMessage('ตรวจสอบสถานะ Google Sheets ไม่สำเร็จ');
+      });
   }, [user]);
 
   const spec = specs.find(item => item.key === part)!;
@@ -195,6 +227,7 @@ export default function App() {
         ? ''
         : String(values[index]);
     const relationType = relation(index);
+    if (index === 0 || (part === 'tasks' && index === 9)) return <input value={value} readOnly />;
     if (relationType === 'customer')
       return (
         <select
@@ -245,30 +278,27 @@ export default function App() {
               {choice}
             </option>
           ))}
-          {part === 'customers' &&
-            index === 5 &&
-            value &&
-            !choices.includes(value) && <option value={value}>{value}</option>}
+          {value && !choices.includes(value) && <option value={value}>{value} (ค่าเดิม)</option>}
         </select>
       );
-    if (spec.numbers?.includes(index))
+    if (spec.numbers?.includes(index)) {
+      if (value && !Number.isFinite(Number(value)))
+        return <input value={value} onChange={event => setField(index, event.target.value)} />;
       return (
-        <input
-          type="number"
-          step="any"
-          value={value}
-          placeholder="กรอกตัวเลข"
-          onChange={event => setField(index, event.target.value)}
-        />
+        <input type="number" step="any" value={value} placeholder="กรอกตัวเลข"
+          onChange={event => setField(index, event.target.value)} />
       );
-    if (spec.dates?.includes(index))
+    }
+    if (spec.dates?.includes(index)) {
+      const dateTime = part === 'contacts' && (index === 3 || index === 12);
+      const validDate = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?$/.test(value);
+      if (value && !validDate)
+        return <input value={value} onChange={event => setField(index, event.target.value)} />;
       return (
-        <input
-          type="date"
-          value={value}
-          onChange={event => setField(index, event.target.value)}
-        />
+        <input type={dateTime ? 'datetime-local' : 'date'} value={value}
+          onChange={event => setField(index, event.target.value)} />
       );
+    }
     if (spec.longText?.includes(index) || spec.headers[index].length > 38)
       return (
         <textarea
@@ -289,8 +319,11 @@ export default function App() {
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
+    if (!record) return;
+    if (!window.confirm('ยืนยันบันทึกการแก้ไขลง Google Sheets จริง?')) return;
     setLoading(true);
     setError('');
+    setNotice('');
     try {
       const normalized = values.map((value, index) =>
         isBlank(value)
@@ -299,17 +332,17 @@ export default function App() {
             ? Number(value)
             : String(value)
       );
-      const response = record
-        ? await api.put(
-            `/api/records/${part}/${encodeURIComponent(record.id)}`,
-            { values: normalized }
-          )
-        : await api.post('/api/records', { part, values: normalized });
+      const response = await api.put(
+        `/api/records/${part}/${encodeURIComponent(record.id)}`,
+        { values: normalized, expectedValues: record.values }
+      );
       setData(response.data.data as Data);
       setRecord(null);
       setValues([]);
+      setNotice('บันทึกการแก้ไขลง Google Sheets แล้ว');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'บันทึกไม่สำเร็จ');
+      const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(responseMessage || (cause instanceof Error ? cause.message : 'บันทึกไม่สำเร็จ'));
     } finally {
       setLoading(false);
     }
@@ -383,7 +416,7 @@ export default function App() {
           <div className="brand-mark">SF</div>
           <p className="eyebrow">PRIVATE WORKSPACE</p>
           <h1>SME Freedom Desk</h1>
-          <p className="muted">ระบบติดตามลูกค้าและงานสินเชื่อ · Sandbox</p>
+          <p className="muted">ระบบติดตามลูกค้าและงานสินเชื่อ · Google Sheets</p>
           <button
             className="button primary large"
             onClick={signIn}
@@ -393,7 +426,7 @@ export default function App() {
           </button>
           {error && <p className="error">{error}</p>}
           <p className="small-note">
-            อนุญาตเฉพาะบัญชีเจ้าของ ระบบ Sandbox นี้แยกข้อมูลจาก Google Sheets
+            อนุญาตเฉพาะบัญชีผู้ดูแล ข้อมูลจะแสดงเมื่อเชื่อม Google Sheets สำเร็จ
           </p>
         </section>
       </main>
@@ -406,7 +439,7 @@ export default function App() {
           <div className="brand">
             SME Freedom <span>DESK</span>
           </div>
-          <small>Private demo · {user.name || user.email}</small>
+          <small>Google Sheets · ผู้ดูแล · {user.name || user.email}</small>
         </div>
         <button
           className="button ghost"
@@ -424,7 +457,19 @@ export default function App() {
             <p className="eyebrow">CUSTOMER RELATIONSHIP</p>
             <h1>ติดตามลูกค้าและงานสินเชื่อ</h1>
             <p className="muted">
-              Sandbox สำหรับข้อมูลจำลอง · ไม่เชื่อมต่อชีตต้นฉบับ
+              ข้อมูลจาก Google Sheets ต้นฉบับ · การบันทึกจะเปลี่ยนข้อมูลในชีตจริง
+            </p>
+            <p className="muted">
+              Google Sheets:{' '}
+              {sheetStatus === 'checking'
+                ? 'กำลังตรวจสอบ Google Sheets'
+                : sheetStatus === 'connected'
+                  ? 'เชื่อมต่อชีตและตรวจหัวตารางแล้ว'
+                  : sheetStatus === 'mismatch'
+                    ? 'หัวตารางไม่ตรง ระบบหยุดโหลดข้อมูล'
+                    : 'เชื่อมต่อไม่สำเร็จ ระบบไม่ใช้ข้อมูล Sandbox'}
+              {sheetMessage && sheetStatus !== 'connected' ? ' · ' + sheetMessage : ''}
+              {sheetStatus === 'connected' ? ' · แก้ไขรายการเดิมได้' : ' · ปิดการแก้ไขจนกว่าจะเชื่อมต่อสำเร็จ'}
             </p>
           </div>
         </section>
@@ -475,9 +520,7 @@ export default function App() {
             >
               รีเฟรช
             </button>
-            <button className="button primary" onClick={beginAdd}>
-              ＋ เพิ่มรายการ
-            </button>
+            <small className="small-note">แก้ไขรายการเดิมได้ · ไม่มีปุ่มเพิ่มหรือลบรายการ</small>
           </div>
         </section>
         <input
@@ -487,49 +530,57 @@ export default function App() {
           placeholder={`ค้นหา${names[part]}`}
         />
         {error && (
-          <div className="error-banner">
-            {error}
-            <button onClick={() => setError('')}>ปิด</button>
+          <div className="error-banner">{error}<button onClick={() => setError('')}>ปิด</button></div>
+        )}
+        {notice && (
+          <div className="success-banner">{notice}<button onClick={() => setNotice('')}>ปิด</button></div>
+        )}
+        {record && (
+          <div className="modal-backdrop">
+            <form className="modal" onSubmit={save}>
+              <div className="modal-head">
+                <h2>แก้ไข{names[part]}</h2>
+                <button className="button" type="button" onClick={() => setRecord(null)}>ปิด</button>
+              </div>
+              <p className="small-note">การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets · รหัสรายการและช่องคำนวณอัตโนมัติแก้ไขไม่ได้</p>
+              {error && <div className="error-banner">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
+              <div className="form-grid">
+                {spec.headers.map((header, index) => (
+                  <label className={spec.longText?.includes(index) || header.length > 38 ? 'wide' : ''} key={header}>
+                    <span>{header}{spec.required.includes(index) ? <b className="required"> *</b> : ''}</span>
+                    {makeFormControl(index)}
+                  </label>
+                ))}
+              </div>
+              <div className="modal-foot">
+                <button className="button" type="button" onClick={() => setRecord(null)}>ยกเลิก</button>
+                <button className="button primary" type="submit" disabled={loading || sheetStatus !== 'connected'}>
+                  {loading ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                {columns[part].map(index => (
-                  <th key={index}>{spec.headers[index]}</th>
-                ))}
-                <th>จัดการ</th>
+                {columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}
+                {sheetStatus === 'connected' && <th>การดำเนินการ</th>}
               </tr>
             </thead>
             <tbody>
               {visibleRows.map(row => (
                 <tr key={row.id}>
                   {columns[part].map(index => (
-                    <td key={index}>
-                      {displayValue(part, index, row.values[index], data)}
-                    </td>
+                    <td key={index}>{displayValue(part, index, row.values[index], data)}</td>
                   ))}
-                  <td className="row-actions">
-                    <button onClick={() => beginEdit(row)}>แก้ไข</button>
-                    {part === 'customers' ? (
-                      <button onClick={() => void archive(row)}>
-                        เก็บถาวร
-                      </button>
-                    ) : (
-                      <button
-                        className="danger-text"
-                        onClick={() => void remove(row)}
-                      >
-                        ลบ
-                      </button>
-                    )}
-                  </td>
+                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button></td>}
                 </tr>
               ))}
               {!visibleRows.length && (
                 <tr>
-                  <td colSpan={columns[part].length + 1} className="empty">
+                  <td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
                     {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
                   </td>
                 </tr>
@@ -538,72 +589,7 @@ export default function App() {
           </table>
         </div>
       </main>
-      {values.length > 0 && (
-        <div
-          className="modal-backdrop"
-          onMouseDown={event => {
-            if (event.target === event.currentTarget) setValues([]);
-          }}
-        >
-          <form className="modal" onSubmit={save}>
-            <div className="modal-head">
-              <div>
-                <small className="eyebrow">
-                  {record ? 'EDIT RECORD' : 'NEW RECORD'}
-                </small>
-                <h2>
-                  {record ? 'แก้ไข' : 'เพิ่ม'}
-                  {names[part]}
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="button"
-                onClick={() => setValues([])}
-              >
-                ปิด
-              </button>
-            </div>
-            <div className="form-grid">
-              {spec.headers.map((header, index) => (
-                <label className={header.length > 38 ? 'wide' : ''} key={index}>
-                  <span>
-                    {header}
-                    {spec.required.includes(index) && (
-                      <b className="required"> *</b>
-                    )}
-                  </span>
-                  {makeFormControl(index)}
-                </label>
-              ))}
-            </div>
-            <p className="small-note">
-              ช่องที่ไม่มีเครื่องหมาย * เว้นว่างได้
-              การเปลี่ยนรายละเอียดการติดต่อจะไม่เขียนทับทะเบียนลูกค้า
-            </p>
-            {error && <div className="error-banner">{error}</div>}
-            <div className="modal-foot">
-              <button
-                type="button"
-                className="button"
-                onClick={() => {
-                  setRecord(null);
-                  setValues([]);
-                }}
-              >
-                ยกเลิก
-              </button>
-              <button
-                className="button primary"
-                type="submit"
-                disabled={loading}
-              >
-                {loading ? 'กำลังบันทึก…' : 'บันทึก'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+
     </div>
   );
 }

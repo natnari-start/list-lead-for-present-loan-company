@@ -361,6 +361,21 @@ td {
 .error-banner {
   color: #b42318;
 }
+.success-banner {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  margin: 12px 0;
+  border: 1px solid #a6d8b5;
+  border-radius: 8px;
+  background: #f1fbf4;
+  color: #176b35;
+}
+.success-banner button {
+  border: 0;
+  background: none;
+  color: inherit;
+}
 .error-banner {
   display: flex;
   justify-content: space-between;

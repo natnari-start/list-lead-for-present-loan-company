@@ -1,32 +1,46 @@
 # SME Freedom Desk
 
-แอปติดตามลูกค้าและงานสินเชื่อ SME
+เว็บแอปติดตามลูกค้าและงานสินเชื่อ SME
 
-## สถานะปัจจุบัน
+## สถานะล่าสุด
 
-- Source code ใน branch นี้ซิงก์จาก AppDeploy snapshot รุ่น 1792379512062
-- Frontend ใช้ React, Vite และ TypeScript
-- Backend ใช้ AppDeploy SDK และฐานข้อมูล AppDeploy
-- Google Sheets ยังไม่ได้เชื่อมต่อ
-- หน้าระบบและ AppDeploy metadata ระบุว่าเป็น Sandbox สำหรับข้อมูลจำลอง
-- การตรวจสิทธิ์ผู้ดูแลฝั่ง server อ่านจาก AppDeploy secret ชื่อ `ADMIN_EMAILS` และปฏิเสธคำขอเมื่อยังไม่ตั้งค่า
+- Source code ซิงก์จาก AppDeploy snapshot รุ่น `1792637669571` (22 ต.ค. 2026)
+- Frontend ใช้ React, Vite และ TypeScript; backend ใช้ AppDeploy SDK
+- ข้อมูลจริงอ่านจาก Google Sheets ผ่าน backend เท่านั้น ไม่มีข้อมูล Sandbox สำรองมาแสดงเมื่อเชื่อมต่อไม่สำเร็จ
+- ผู้ดูแลแก้ไขรายการเดิมใน Google Sheets ผ่าน WebApp ได้ โดยล็อกรหัสรายการและป้องกันการเขียนทับเมื่อข้อมูลเปลี่ยนหลังโหลด
+- ปิดการเพิ่มและลบข้อมูลจาก WebApp ในเวอร์ชันนี้
+- ตรวจสิทธิ์ service account แล้วพบ `writer` (ระดับ Editor) บนชีต การทดสอบเขียนจริงยังไม่ได้ทำเพื่อไม่แตะแถวลูกค้าโดยไม่เลือกข้อมูลทดสอบ
+- Live app: [SME Freedom Desk](https://sme-freedom-desk-vofbzr.v2.appdeploy.ai/)
 
 ## โครงสร้าง
 
 - `src/` หน้าจอและ schema ของข้อมูล 5 ส่วน
-- `backend/` API และ realtime handlers
-- `tests/tests.json` กรณีทดสอบสำหรับ AppDeploy
-- `docs/CRAFT_MASTER_PROMPT.md` prompt สำหรับการพัฒนาต่อ
-- `docs/GOOGLE_SHEETS_MIGRATION.md` สถานะและแนวทางเชื่อมชีต
+- `backend/googleSheets.ts` การยืนยันตัวตน service account การอ่าน และการแก้ไข Google Sheets
+- `backend/index.ts` API, admin allowlist และการตรวจสอบข้อมูลก่อนบันทึก
+- `tests/tests.json` กรณีทดสอบ E2E ที่ AppDeploy ใช้ตอน deploy/QA
+- `docs/GOOGLE_SHEETS_MIGRATION.md` สถานะการเชื่อมต่อ ขอบเขตการเขียน และการตั้งค่า
 
-## พัฒนา
+## ตั้งค่า AppDeploy secrets
 
-โครงการนี้อาศัย `@appdeploy/client` และ `@appdeploy/sdk` ซึ่งจัดให้โดย runtime ของ AppDeploy จึงต้องตรวจวิธี build และ test ตามคู่มือปัจจุบันของ AppDeploy ก่อนรันนอกแพลตฟอร์ม
+ข้อมูลต่อไปนี้ต้องตั้งเป็น secrets ฝั่ง backend ผ่าน secret-entry ของ AppDeploy ก่อน deploy source จาก branch นี้:
 
-## ความปลอดภัย
+- `ADMIN_EMAILS` — รายชื่ออีเมลผู้ดูแล รูปแบบ JSON array หรือคั่นด้วย comma/newline
+- `GOOGLE_SERVICE_ACCOUNT_JSON` — service-account JSON ทั้งชุด
+- `GOOGLE_SPREADSHEET_ID` — ID ของ Google Sheet เป้าหมาย
 
-ห้าม commit ข้อมูลลูกค้าจริง, Spreadsheet ID ภายใน, OAuth token, service-account key, `.env` หรือ credentials เข้าสู่ repository นี้ ซึ่งเป็น public repository ใช้ข้อมูลจำลองในการพัฒนาและทดสอบเท่านั้น
+ห้ามใส่ secret, Spreadsheet ID, private key, token หรือข้อมูลลูกค้าใน source code, frontend, log, issue หรือ repository สาธารณะ
 
-## ตรวจสอบก่อน merge และก่อน Live
+## พัฒนาและตรวจสอบ
 
-GitHub Actions workflow `.github/workflows/appdeploy-preflight.yml` จะรัน `npm run verify:prelive` เมื่อ push เข้า branch นี้หรือเปิด Pull Request เข้า `main` โดยตรวจ Vite build, unit tests ของ mock storage และรูปแบบไฟล์ `tests/tests.json` ตามสัญญา AppDeploy ทั้งนี้ build ใน CI จะ externalize `@appdeploy/client` ซึ่ง AppDeploy จัดให้ตอน runtime จึงเป็น preflight build ไม่ใช่การยืนยัน production runtime ส่วน AppDeploy E2E จาก `tests/tests.json` จะรันในขั้น Deploy/QA ของ AppDeploy เท่านั้น
+Runtime ของ AppDeploy จัดเตรียม `@appdeploy/client` และ `@appdeploy/sdk`; CI ใช้ Vite preflight build, unit tests, ตรวจโครงสร้าง `tests/tests.json` และสแกน source สำหรับค่าลับที่ไม่ควรอยู่ใน public repo
+
+```sh
+npm install
+npm run verify:prelive
+```
+
+Vite preflight ไม่แทนการทดสอบ backend ใน AppDeploy runtime การทดสอบ E2E จริงจะทำในขั้น Deploy/QA ของ AppDeploy
+
+## แนวทางพัฒนา
+
+สร้าง branch แยกจาก `main` สำหรับการอัปเดต source และเปิด Pull Request เพื่อตรวจทานก่อน merge ห้าม push source ที่มีข้อมูลจริงหรือ credential ขึ้น repository นี้

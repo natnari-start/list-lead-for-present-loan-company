@@ -1,37 +1,43 @@
-# Google Sheets migration status
+# Google Sheets integration status
 
 ## Current state
 
-The deployed app currently uses AppDeploy's database. The attached workbook is an XLSX schema reference with seven tabs. It is not a verified native Google Sheets URL or database connection. No live Sheet ID or Google API credentials are configured in this repository.
+The deployed AppDeploy snapshot is `1792637669571` (22 Oct 2026). The application reads live records from the native Google Sheet through server-side Google Sheets API calls. The frontend has no Sandbox fallback when the Google connection fails.
 
-## Required before implementation
+The app supports editing existing rows through `PUT /api/records/:part/:id`. Record IDs are immutable, task formula columns are protected, input values are validated, and stale edits are rejected if the row changed after it was loaded. Create and delete routes are disabled.
 
-1. Confirm the exact native Google Sheets file that will be the system of record.
-2. Inspect tab names, header rows, formulas, validation, and protections without exposing row values in logs or GitHub.
-3. Choose an approved server-side authentication method for the app runtime and grant only the access required.
-4. Store credentials in the platform's encrypted secret store. Never put credentials, private Spreadsheet IDs, or customer rows in frontend code or this public repository.
-5. Back up the target sheet and validate a schema mapping with synthetic records before enabling writes.
-6. Define rollback and avoid dual-writing to AppDeploy DB and Sheets unless consistency handling and reconciliation are implemented and tested.
+Service-account access was checked through Google Drive permissions: the service account has the `writer` role, equivalent to Editor. A live write test has not been run because it would require changing a real customer row; no customer data was altered during the permission check.
 
-## Schema observations
+## Backend configuration
 
-The workbook contains: ทะเบียนลูกค้า (52 columns), เคสสินเชื่อ (16), ประวัติการติดต่อ (15), งานติดตาม (11), รายการเอกสาร (10), วิธีใช้ (2), and ข้อมูลนำเข้า_43210 (18).
+Set these values through AppDeploy's encrypted secret-entry flow. Do not include them in this public repository or frontend bundle.
 
-The AppDeploy snapshot's contact-history schema had 14 columns. The source-sync branch adds the missing final field, รายละเอียดธุรกิจจากการติดต่อ (JSON), and validates non-empty values as JSON. No workbook row values were copied.
+- `ADMIN_EMAILS`: admin allowlist, as a JSON string array or a comma/newline-delimited list.
+- `GOOGLE_SERVICE_ACCOUNT_JSON`: full service-account JSON. The backend reads it only to create a short-lived Google OAuth token.
+- `GOOGLE_SPREADSHEET_ID`: target spreadsheet ID. The backend validates and reads it as a secret; it is not hardcoded in the public source.
 
-## Storage boundary
+Missing secrets fail closed. The data API does not return demo data as a fallback.
 
-`backend/storage-port.ts` defines a backend-neutral storage contract. `backend/mock-storage.ts` provides an in-memory implementation for synthetic tests only. The mock is not connected to production routes and does not persist data. The current backend still uses AppDeploy DB.
+## Sheets and relationships
 
-## Data relationships to preserve
+The app expects these tabs and headers, as defined in `src/schema.ts`:
 
-- Customer ID joins the customer register to cases, contacts, and follow-up tasks.
-- Case ID joins cases to documents and optional contact/task records.
-- One customer may have multiple cases.
-- Editing a customer must not overwrite contact history or delete linked records.
-- Dashboard amounts must aggregate at case grain, and customer counts must use unique customer IDs.
-- Completed and cancelled tasks must not be shown as overdue.
+- `ทะเบียนลูกค้า`
+- `เคสสินเชื่อ`
+- `ประวัติการติดต่อ`
+- `งานติดตาม`
+- `รายการเอกสาร`
 
-## Not yet connected
+Customer IDs connect cases, contacts and follow-up tasks. Case IDs connect documents and optional case-related contact/task records. One customer can have multiple cases. Editing a customer does not delete linked rows.
 
-There is no Google Sheets adapter, live Sheet ID, credential, migration, or write test in this branch. Keep the current AppDeploy repository as the active backend until the native Sheet and the server-side access method are confirmed and tested with synthetic data.
+## Verification completed
+
+- Live Sheet metadata and expected tab headers were checked through the app integration status endpoint.
+- The service-account permission metadata reports `writer`.
+- AppDeploy snapshot `1792637669571` reached `ready`; the stored QA snapshot had no frontend or network errors.
+- UI editor was opened and canceled; the identifier was read-only, and cancel caused no write.
+- No actual write request against customer data has been used as a permission test.
+
+## CI scope
+
+GitHub preflight checks the Vite build, existing unit tests, AppDeploy E2E test-file schema and public-source secret rules. It does not replace AppDeploy backend execution or a controlled write test against an approved test row.

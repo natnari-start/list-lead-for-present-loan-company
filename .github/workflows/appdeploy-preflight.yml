@@ -3,7 +3,7 @@ name: AppDeploy preflight
 on:
   push:
     branches:
-      - feature/appdeploy-source-sync
+      - 'feature/**'
   pull_request:
     branches:
       - main
