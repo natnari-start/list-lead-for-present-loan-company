@@ -68,6 +68,7 @@ export default function App() {
   const [data, setData] = useState<Data>(blankData());
   const [query, setQuery] = useState('');
   const [record, setRecord] = useState<Row | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -76,6 +77,15 @@ export default function App() {
     'checking' | 'connected' | 'mismatch' | 'error'
   >('checking');
   const [sheetMessage, setSheetMessage] = useState('');
+
+  useEffect(() => {
+    if (!selectedCustomer) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedCustomer(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [selectedCustomer]);
 
   const load = async () => {
     setLoading(true);
@@ -137,6 +147,7 @@ export default function App() {
   }, [user]);
 
   const spec = specs.find(item => item.key === part)!;
+  const customerSpec = specs.find(item => item.key === 'customers')!;
   const visibleRows = useMemo(
     () =>
       (data[part] || []).filter(
@@ -535,6 +546,64 @@ export default function App() {
         {notice && (
           <div className="success-banner">{notice}<button onClick={() => setNotice('')}>ปิด</button></div>
         )}
+        {selectedCustomer && part === 'customers' && (
+          <div
+            className="modal-backdrop"
+            onClick={event => {
+              if (event.target === event.currentTarget) setSelectedCustomer(null);
+            }}
+          >
+            <section
+              className="modal details-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="customer-details-title"
+            >
+              <div className="modal-head">
+                <div className="details-heading">
+                  <p className="eyebrow">COMPANY PROFILE</p>
+                  <h2 id="customer-details-title">
+                    {String(selectedCustomer.values[2] || 'ข้อมูลบริษัท')}
+                  </h2>
+                  <p className="small-note details-meta">
+                    รหัสลูกค้า: {String(selectedCustomer.values[0] || '—')}
+                  </p>
+                </div>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => setSelectedCustomer(null)}
+                  aria-label="ปิดข้อมูลบริษัท"
+                >
+                  ปิด
+                </button>
+              </div>
+              <p className="small-note details-note">
+                แสดงข้อมูลทั้งหมดจากทะเบียนลูกค้า · โหมดอ่านอย่างเดียว
+              </p>
+              <div className="details-grid">
+                {customerSpec.headers.map((header, index) => {
+                  const value = selectedCustomer.values[index];
+                  return (
+                    <div className="detail-field" key={header}>
+                      <span>{header}</span>
+                      <strong>{isBlank(value) ? '—' : String(value)}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="modal-foot">
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => setSelectedCustomer(null)}
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
         {record && (
           <div className="modal-backdrop">
             <form className="modal" onSubmit={save}>
@@ -573,7 +642,21 @@ export default function App() {
               {visibleRows.map(row => (
                 <tr key={row.id}>
                   {columns[part].map(index => (
-                    <td key={index}>{displayValue(part, index, row.values[index], data)}</td>
+                    <td key={index}>
+                      {part === 'customers' && index === 2 ? (
+                        <button
+                          type="button"
+                          className="company-name-button"
+                          onClick={() => setSelectedCustomer(row)}
+                          aria-haspopup="dialog"
+                          aria-label={`เปิดข้อมูลบริษัท ${String(row.values[2] || 'ไม่ระบุชื่อบริษัท')}`}
+                        >
+                          {displayValue(part, index, row.values[index], data)}
+                        </button>
+                      ) : (
+                        displayValue(part, index, row.values[index], data)
+                      )}
+                    </td>
                   ))}
                   {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button></td>}
                 </tr>
