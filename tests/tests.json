@@ -51,5 +51,23 @@
       "Confirm each tab loads its matching table or displays a clear source error"
     ],
     "expected": "Each tab uses its Google Sheets data and no tab is silently populated from another source."
+  },
+  {
+    "name": "Customer name opens a read-only company profile",
+    "viewport": "desktop",
+    "covers": [
+      "company detail popup",
+      "all customer registry fields",
+      "read-only company details"
+    ],
+    "description": "Verifies an authorized user can open the full registry details from a company name without changing the source.",
+    "steps": [
+      "Sign in with the authorized Google account",
+      "Wait until Google Sheets data is loaded",
+      "Open the customer register and click a visible company name",
+      "Confirm the profile shows the customer ID and every registry field",
+      "Close the profile without saving"
+    ],
+    "expected": "A read-only popup shows every customer field for the selected company, including empty fields as dashes, then closes without writing to Google Sheets."
   }
 ]
