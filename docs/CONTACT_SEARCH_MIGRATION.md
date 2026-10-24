@@ -59,14 +59,22 @@ migration performs no writes. No new backend migration endpoint is exposed.
 
 Production migration and deployment are separate owner-authorized actions.
 Do not deploy this 53-column source against the old 52-column sheet: strict
-header checks will stop loading. Do not append the header while old production
-code is serving normal traffic, because it may see an extra header and fail.
-Coordinate the schema change and matching source during a maintenance window.
+header checks will stop loading. Verify the current source and back up the sheet
+before applying the append-only migration, then deploy the matching source.
 
-Keep the pre-release app snapshot and sheet backup. A rollback also needs a
-compatible sheet schema; restoring only the old app against a 53-column sheet is
-insufficient. Preserve/export new flag values before any owner-approved column
-removal or restoration. Never automatically delete the new column to roll back.
+The production v9 snapshot (1792809757187) was inspected before release: its
+header/data ranges end at the old schema width and its writes target only changed
+cells. It ignores a new trailing BA column, so this specific version can continue
+reading the original 52 columns while the new field is added. Avoid concurrent
+structural edits and refresh open clients after deployment. Do not assume this
+compatibility for another version without checking its source and headers.
+
+Keep the pre-release app snapshot and private native sheet backup. For this
+append-only release, restoring the verified v9 app can leave BA and any recorded
+flags intact; do not automatically delete or restore customer data during an app
+rollback. Sheet restoration is a separate owner-authorized recovery step. For
+other rollback versions, verify header-range compatibility first and preserve
+new flag values before any approved column removal or restoration.
 
 ## Verification boundaries
 
