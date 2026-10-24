@@ -69,5 +69,27 @@
       "Close the profile without saving"
     ],
     "expected": "A read-only popup shows every customer field for the selected company, including empty fields as dashes, then closes without writing to Google Sheets."
+  },
+  {
+    "name": "Draft company name controls the Google Search link",
+    "viewport": "mobile",
+    "covers": [
+      "company Google Search link",
+      "unsaved company-name edits",
+      "blank company-name guard",
+      "safe external link attributes",
+      "cancel without writing"
+    ],
+    "description": "Checks the customer edit header uses the current synthetic company name for Google Search while preserving editable form values.",
+    "steps": [
+      "Use only an isolated synthetic-data test app containing SYN-CUST-001, not production customer records",
+      "Sign in with the authorized test account and open the edit form for SYN-CUST-001",
+      "Change the company name to บริษัท ทดสอบ เอสเอ็มอี จำกัด without saving",
+      "Inspect the header link without following it: its Google query must match the trimmed name, its target must be _blank and its rel must contain noopener noreferrer",
+      "Change the name to บริษัท ทดสอบ A&B จำกัด and confirm the link query updates without changing the input or closing the form",
+      "Clear the company name and confirm the search link is hidden",
+      "Cancel without saving"
+    ],
+    "expected": "Only the customer edit header has the Google Search link; it follows the current Thai draft name, safely encodes special characters, hides when blank and never writes data during this test."
   }
 ]

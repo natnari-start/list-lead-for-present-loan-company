@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
+import { getCompanySearchLink } from './company-search';
 
 type Part = 'customers' | 'cases' | 'contacts' | 'tasks' | 'documents';
 type Row = { id: string; values: unknown[] };
@@ -148,6 +149,8 @@ export default function App() {
 
   const spec = specs.find(item => item.key === part)!;
   const customerSpec = specs.find(item => item.key === 'customers')!;
+  const companySearch =
+    part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
   const visibleRows = useMemo(
     () =>
       (data[part] || []).filter(
@@ -606,9 +609,23 @@ export default function App() {
         )}
         {record && (
           <div className="modal-backdrop">
-            <form className="modal" onSubmit={save}>
+            <form className="modal edit-modal" onSubmit={save}>
               <div className="modal-head">
-                <h2>แก้ไข{names[part]}</h2>
+                <div className="edit-heading">
+                  <h2>แก้ไข{names[part]}</h2>
+                  {companySearch && (
+                    <a
+                      className="company-search-link"
+                      href={companySearch.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`ค้นหา ${companySearch.name} ใน Google (เปิดแท็บใหม่)`}
+                    >
+                      <span>{companySearch.name}</span>
+                      <small>ค้นหาใน Google · เปิดแท็บใหม่ ↗</small>
+                    </a>
+                  )}
+                </div>
                 <button className="button" type="button" onClick={() => setRecord(null)}>ปิด</button>
               </div>
               <p className="small-note">การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets · รหัสรายการและช่องคำนวณอัตโนมัติแก้ไขไม่ได้</p>

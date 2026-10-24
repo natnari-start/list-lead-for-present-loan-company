@@ -379,6 +379,46 @@ td {
   margin: 0;
   font-size: 20px;
 }
+.edit-modal .modal-head {
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.edit-heading {
+  flex: 1;
+  min-width: 0;
+}
+.edit-modal .modal-head > .button {
+  flex-shrink: 0;
+}
+.company-search-link {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  margin-top: 8px;
+  color: #185d98;
+  font-size: 14px;
+  line-height: 1.5;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.company-search-link > span {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.company-search-link small {
+  color: #68778a;
+  font-size: 11px;
+}
+.company-search-link:hover {
+  color: #103d68;
+}
+.company-search-link:focus-visible {
+  outline: 2px solid #2365a8;
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 .modal-foot {
   justify-content: flex-end;
   gap: 9px;
