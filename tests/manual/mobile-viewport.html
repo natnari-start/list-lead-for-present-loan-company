@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SME Freedom Desk — Mobile viewport QA</title>
+    <!--
+      Test-only harness. Deploy this file to public/mobile-viewport-qa.html
+      ONLY on the isolated synthetic-data AppDeploy app. Keeping the source
+      under tests/manual prevents inclusion in the production Vite build.
+      The iframe loads the unchanged app and uses its normal authentication.
+    -->
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #eef2f7;
+        color: #17212f;
+        font-family: system-ui, sans-serif;
+      }
+      main { max-width: 1100px; margin: 0 auto; }
+      h1 { margin: 0 0 12px; font-size: 22px; }
+      p { line-height: 1.6; }
+      .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+      select { padding: 8px; font: inherit; }
+      output { font-weight: 600; }
+      .stage { overflow: auto; margin-top: 20px; padding: 12px; }
+      iframe {
+        display: block;
+        width: 375px;
+        height: 667px;
+        box-sizing: content-box;
+        margin: 0 auto;
+        border: 8px solid #17212f;
+        border-radius: 18px;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>ทดสอบ Mobile viewport — ข้อมูลสังเคราะห์เท่านั้น</h1>
+      <p>หน้านี้จำลองเฉพาะขนาด viewport ไม่ได้จำลองเครื่องจริง ระบบปฏิบัติการ หรือการสัมผัสหน้าจอ โปรดยกเลิกค่าที่แก้ไขระหว่างทดสอบทุกครั้ง</p>
+      <div class="controls">
+        <label for="viewport">ขนาดหน้าจอทดสอบ</label>
+        <select id="viewport">
+          <option value="375x667">375 × 667 — แนวตั้ง</option>
+          <option value="390x844">390 × 844 — แนวตั้ง</option>
+          <option value="667x375">667 × 375 — แนวนอน</option>
+        </select>
+        <output id="size" aria-live="polite">375 × 667 CSS px</output>
+      </div>
+      <div class="stage">
+        <iframe id="app" src="./index.html" title="SME Freedom Desk mobile viewport"></iframe>
+      </div>
+    </main>
+    <script>
+      const viewport = document.getElementById('viewport');
+      const frame = document.getElementById('app');
+      const size = document.getElementById('size');
+      viewport.addEventListener('change', () => {
+        const [width, height] = viewport.value.split('x').map(Number);
+        frame.style.width = `${width}px`;
+        frame.style.height = `${height}px`;
+        size.textContent = `${width} × ${height} CSS px`;
+      });
+    </script>
+  </body>
+</html>
