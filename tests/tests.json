@@ -82,11 +82,12 @@
     ],
     "description": "Checks the customer edit header uses the current synthetic company name for Google Search while preserving editable form values.",
     "steps": [
-      "Use only an isolated synthetic-data test app containing SYN-CUST-001, not production customer records",
-      "Sign in with the authorized test account and open the edit form for SYN-CUST-001",
+      "Use only an isolated synthetic-data test app containing SYN-TEST-CUST-001, not production customer records",
+      "Sign in with the authorized test account and open the edit form for SYN-TEST-CUST-001",
       "Change the company name to บริษัท ทดสอบ เอสเอ็มอี จำกัด without saving",
-      "Inspect the header link without following it: its Google query must match the trimmed name, its target must be _blank and its rel must contain noopener noreferrer",
+      "Inspect the header link: its Google query must match the trimmed name, its target must be _blank and its rel must contain noopener noreferrer",
       "Change the name to บริษัท ทดสอบ A&B จำกัด and confirm the link query updates without changing the input or closing the form",
+      "Open the header link using only this synthetic company name, verify Google opens in a new tab with the matching query, and return to confirm the unsaved form values are unchanged",
       "Clear the company name and confirm the search link is hidden",
       "Cancel without saving"
     ],
