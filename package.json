@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:ci": "vite build --config vite.ci.config.ts",
-    "test": "node --experimental-strip-types --test tests/unit/*.test.mjs && node scripts/validate-appdeploy-tests.mjs && node scripts/check-public-source.mjs",
+    "test": "node --experimental-strip-types --test tests/unit/*.test.mjs && node scripts/validate-appdeploy-tests.mjs && node scripts/validate-appdeploy-tests.mjs tests/production-smoke.json && node scripts/check-public-source.mjs",
     "verify:prelive": "npm run build:ci && npm test",
     "check:public-source": "node scripts/check-public-source.mjs"
   },

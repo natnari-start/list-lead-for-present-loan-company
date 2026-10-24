@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const path = new URL('../tests/tests.json', import.meta.url);
+const testPath = process.argv[2] || 'tests/tests.json';
+const path = new URL(`../${testPath}`, import.meta.url);
 const suite = JSON.parse(readFileSync(path, 'utf8'));
 
-assert.ok(Array.isArray(suite), 'tests/tests.json must contain a JSON array');
+assert.ok(Array.isArray(suite), `${testPath} must contain a JSON array`);
 assert.ok(suite.length >= 3 && suite.length <= 5, 'AppDeploy expects 3-5 focused tests');
 
 const allowed = new Set([
@@ -39,4 +40,4 @@ for (const [index, testCase] of suite.entries()) {
 }
 assert.equal(suite.filter(testCase => testCase.sanity === true).length, 1, 'exactly one test must be marked sanity');
 
-console.log(`Validated ${suite.length} AppDeploy E2E test definitions.`);
+console.log(`Validated ${suite.length} AppDeploy E2E test definitions (${testPath}).`);

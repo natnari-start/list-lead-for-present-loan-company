@@ -1,0 +1,76 @@
+[
+  {
+    "name": "Authorized admin inspects the search link and cancels without writing",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": [
+      "Google authentication",
+      "admin allowlist",
+      "Google Sheets source",
+      "existing-record editor",
+      "immutable record identifiers",
+      "cancel without writing",
+      "company Google Search link attributes",
+      "no external search of production names"
+    ],
+    "description": "Checks an authorized admin can inspect the customer search link and cancel the editor without changing fields or navigating to Google.",
+    "steps": [
+      "Sign in with the authorized Google account",
+      "Wait until Google Sheets data is loaded",
+      "Open the edit form for a visible customer record without changing any field",
+      "Confirm the record identifier is read only",
+      "Inspect the company-name link without following it: verify the Google search URL matches the trimmed displayed name, target is _blank and rel contains noopener noreferrer",
+      "Cancel the form without saving"
+    ],
+    "expected": "The customer editor shows a read-only identifier and a correctly encoded, safe search link; cancel closes it without a Google search or any change to sheet data."
+  },
+  {
+    "name": "Google Sheets access failure shows the failing stage",
+    "viewport": "mobile",
+    "covers": [
+      "Google Sheets API errors",
+      "credential and network diagnostics",
+      "schema mismatch distinction",
+      "no silent Sandbox fallback"
+    ],
+    "description": "Checks a failed source connection identifies whether authentication, API access, or schema validation failed without exposing secrets.",
+    "steps": [
+      "Sign in while Google Sheets access is unavailable",
+      "Wait for the data request and connection status to settle"
+    ],
+    "expected": "The app distinguishes a connection or credential failure from a header mismatch and does not show Sandbox records."
+  },
+  {
+    "name": "Spreadsheet headers and tabs remain compatible",
+    "viewport": "desktop",
+    "covers": [
+      "spreadsheet tab and header verification",
+      "customer, case, contact, task, document navigation"
+    ],
+    "description": "Checks the expected Google Sheet tabs and their schema are recognized by the application.",
+    "steps": [
+      "Sign in with the authorized Google account",
+      "Open each of the five data tabs",
+      "Confirm each tab loads its matching table or displays a clear source error"
+    ],
+    "expected": "Each tab uses its Google Sheets data and no tab is silently populated from another source."
+  },
+  {
+    "name": "Customer name opens a read-only company profile",
+    "viewport": "desktop",
+    "covers": [
+      "company detail popup",
+      "all customer registry fields",
+      "read-only company details"
+    ],
+    "description": "Verifies an authorized user can open the full registry details from a company name without changing the source.",
+    "steps": [
+      "Sign in with the authorized Google account",
+      "Wait until Google Sheets data is loaded",
+      "Open the customer register and click a visible company name",
+      "Confirm the profile shows the customer ID and every registry field",
+      "Close the profile without saving"
+    ],
+    "expected": "A read-only popup shows every customer field for the selected company, including empty fields as dashes, then closes without writing to Google Sheets."
+  }
+]
