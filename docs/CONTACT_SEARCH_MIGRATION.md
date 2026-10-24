@@ -45,9 +45,14 @@ Unchecking removes the mark and does not assert that contact details were found.
 
 5. Run it again. It must report `Already migrated; no changes made.`
 6. Check the original headers and values, the new header and native BOOLEAN
-   validation, plus the visible header/checkbox layout. Deploy the matching
-   application version only after the sheet header is ready, then confirm the
-   integration status recognizes all five tabs.
+   validation, plus the visible header/checkbox layout. If a native customer
+   table covers only part of the registry columns, extend that same table's
+   range to include the full schema width before allowing status edits. Preserve
+   its existing row bounds, column properties and banding; verify no unrelated
+   table or banding overlaps. This keeps the flag with its customer when the
+   native table is sorted. The header planner does not perform this table edit.
+7. Deploy the matching application version only after the sheet header/table is
+   ready, then confirm the integration status recognizes all five tabs.
 
 The pure planner in `scripts/contact-search-migration.mjs` is shared with tests.
 It refuses altered/duplicated headers or an occupied target column. It appends
