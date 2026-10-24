@@ -1,3 +1,5 @@
+import { CONTACT_SEARCH_HEADER } from './contact-search-status.ts';
+
 export const schemas = [
   {
     headers: [
@@ -53,6 +55,7 @@ export const schemas = [
       'YouTube',
       'LinkedIn บริษัท/ผู้บริหาร',
       'Marketplace/ช่องทางออนไลน์อื่น',
+      CONTACT_SEARCH_HEADER,
     ],
     dates: [1, 8, 18, 22],
     text: [

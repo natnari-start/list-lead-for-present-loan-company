@@ -298,6 +298,46 @@ td {
 .details-modal {
   width: min(1000px, 100%);
 }
+.company-registry-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 260px;
+}
+.contact-search-control {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 0;
+  line-height: 1.5;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.contact-search-control input,
+.form-grid input.contact-search-input {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  accent-color: #185d98;
+}
+.contact-search-control input:focus-visible,
+.contact-search-input:focus-visible {
+  outline: 2px solid #2365a8;
+  outline-offset: 3px;
+}
+.contact-search-control:has(input:disabled) {
+  cursor: default;
+  color: #68778a;
+}
+.contact-search-state {
+  color: #68778a;
+  font-size: 11px;
+  line-height: 1.5;
+}
 .details-modal .modal-head {
   align-items: flex-start;
   gap: 16px;

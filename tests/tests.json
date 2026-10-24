@@ -9,12 +9,20 @@
       "Google Sheets source",
       "existing-record editor",
       "immutable record identifiers",
-      "cancel without writing"
+      "cancel without writing",
+      "spreadsheet tab and header verification",
+      "customer, case, contact, task, document navigation",
+      "company detail popup",
+      "all customer registry fields",
+      "read-only company details"
     ],
     "description": "Checks an authorized admin can open the form for an existing sheet record, see protected fields, and cancel without changing the sheet.",
     "steps": [
       "Sign in with the authorized Google account",
       "Wait until Google Sheets data is loaded",
+      "Visit all five data tabs and confirm each table uses its matching sheet",
+      "Return to the customer register, open a company name and confirm every registry field is present and read only",
+      "Close the company profile",
       "Open the edit form for a visible record",
       "Confirm the record identifier is read only",
       "Cancel the form without saving"
@@ -38,39 +46,6 @@
     "expected": "The app distinguishes a connection or credential failure from a header mismatch and does not show Sandbox records."
   },
   {
-    "name": "Spreadsheet headers and tabs remain compatible",
-    "viewport": "desktop",
-    "covers": [
-      "spreadsheet tab and header verification",
-      "customer, case, contact, task, document navigation"
-    ],
-    "description": "Checks the expected Google Sheet tabs and their schema are recognized by the application.",
-    "steps": [
-      "Sign in with the authorized Google account",
-      "Open each of the five data tabs",
-      "Confirm each tab loads its matching table or displays a clear source error"
-    ],
-    "expected": "Each tab uses its Google Sheets data and no tab is silently populated from another source."
-  },
-  {
-    "name": "Customer name opens a read-only company profile",
-    "viewport": "desktop",
-    "covers": [
-      "company detail popup",
-      "all customer registry fields",
-      "read-only company details"
-    ],
-    "description": "Verifies an authorized user can open the full registry details from a company name without changing the source.",
-    "steps": [
-      "Sign in with the authorized Google account",
-      "Wait until Google Sheets data is loaded",
-      "Open the customer register and click a visible company name",
-      "Confirm the profile shows the customer ID and every registry field",
-      "Close the profile without saving"
-    ],
-    "expected": "A read-only popup shows every customer field for the selected company, including empty fields as dashes, then closes without writing to Google Sheets."
-  },
-  {
     "name": "Draft company name controls the Google Search link",
     "viewport": "mobile",
     "covers": [
@@ -92,5 +67,54 @@
       "Cancel without saving"
     ],
     "expected": "Only the customer edit header has the Google Search link; it follows the current Thai draft name, safely encodes special characters, hides when blank and never writes data during this test."
+  },
+  {
+    "name": "Manual Google contact-search mark persists for one synthetic customer",
+    "viewport": "mobile",
+    "covers": [
+      "manual search result checkbox",
+      "stable customer ID with duplicate company names",
+      "native Google Sheets checkbox persistence",
+      "keyboard Space activation",
+      "existing company details and search link"
+    ],
+    "description": "Checks manual marking and unmarking on the isolated synthetic sheet without affecting a duplicate-name customer.",
+    "steps": [
+      "Use only the synthetic test app and synthetic customer IDs SYN-TEST-CUST-001 and SYN-TEST-CUST-002; never run writes against production",
+      "Sign in and open the customer register; confirm both names have a separate checkbox labelled seach google ไม่พบข้อมูลช่องทางติดต่อ",
+      "Use Space on the checkbox for SYN-TEST-CUST-001 and wait for confirmed success",
+      "Refresh and reopen the app in a second view; confirm only SYN-TEST-CUST-001 is checked",
+      "Open the company profile and confirm the new status is read only; open and cancel the editor to confirm the Google Search link still exists",
+      "Uncheck SYN-TEST-CUST-001 and refresh; confirm the mark is removed and neither company gained changed contact details"
+    ],
+    "expected": "The selected synthetic customer retains its mark after refresh and in another view, then retains the unmarked result; the duplicate-name row is unchanged and checkbox interaction opens no dialog or Google tab."
+  },
+  {
+    "name": "Failed contact-search write restores the previously confirmed mark",
+    "viewport": "desktop",
+    "covers": [
+      "failed write rollback",
+      "visible save error",
+      "no false success",
+      "repeat-click protection"
+    ],
+    "description": "Injects an update failure and verifies the checkbox returns to its previous confirmed state.",
+    "qa_faults": [
+      {
+        "method": "PUT",
+        "path": "/api/records/customers/SYN-TEST-CUST-001",
+        "status": 502,
+        "body_json": {
+          "error": "Synthetic contact-search save failure"
+        }
+      }
+    ],
+    "steps": [
+      "Use only the isolated synthetic test app with SYN-TEST-CUST-001",
+      "Sign in, note the current confirmed checkbox state and toggle it",
+      "Wait for the injected failure and inspect the customer register",
+      "Refresh and verify the source state is unchanged"
+    ],
+    "expected": "A visible error is shown, no success is claimed, and the checkbox and sheet remain at the previous confirmed state."
   }
 ]

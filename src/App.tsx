@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
+import {
+  CONTACT_SEARCH_HEADER,
+  CONTACT_SEARCH_LABEL,
+  contactSearchUpdate,
+  isContactSearchChecked,
+} from './contact-search-status';
 
 type Part = 'customers' | 'cases' | 'contacts' | 'tasks' | 'documents';
 type Row = { id: string; values: unknown[] };
@@ -74,6 +80,8 @@ export default function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingContactSearch, setPendingContactSearch] = useState<Record<string, boolean>>({});
+  const contactSearchLocks = useRef(new Set<string>());
   const [sheetStatus, setSheetStatus] = useState<
     'checking' | 'connected' | 'mismatch' | 'error'
   >('checking');
@@ -149,6 +157,8 @@ export default function App() {
 
   const spec = specs.find(item => item.key === part)!;
   const customerSpec = specs.find(item => item.key === 'customers')!;
+  const companyNameIndex = customerSpec.headers.indexOf('ชื่อบริษัท');
+  const contactSearchIndex = customerSpec.headers.indexOf(CONTACT_SEARCH_HEADER);
   const companySearch =
     part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
   const visibleRows = useMemo(
@@ -242,6 +252,16 @@ export default function App() {
         : String(values[index]);
     const relationType = relation(index);
     if (index === 0 || (part === 'tasks' && index === 9)) return <input value={value} readOnly />;
+    if (part === 'customers' && spec.headers[index] === CONTACT_SEARCH_HEADER) {
+      return (
+        <input
+          type="checkbox"
+          className="contact-search-input"
+          checked={isContactSearchChecked(values[index])}
+          onChange={event => setField(index, event.target.checked ? 'TRUE' : 'FALSE')}
+        />
+      );
+    }
     if (relationType === 'customer')
       return (
         <select
@@ -330,6 +350,46 @@ export default function App() {
       />
     );
   };
+
+  async function toggleContactSearch(row: Row, checked: boolean) {
+    if (loading || sheetStatus !== 'connected' || contactSearchLocks.current.has(row.id)) return;
+    contactSearchLocks.current.add(row.id);
+    setPendingContactSearch(current => ({ ...current, [row.id]: checked }));
+    setError('');
+    setNotice('');
+    try {
+      const response = await api.put(
+        `/api/records/customers/${encodeURIComponent(row.id)}`,
+        contactSearchUpdate(customerSpec.headers, row, checked)
+      );
+      const saved = (response.data.data as Data).customers.find(item => item.id === row.id);
+      if (!saved) throw new Error('ไม่พบผลยืนยันการบันทึก กรุณารีเฟรช');
+      setData(current => ({
+        ...current,
+        customers: current.customers.map(item => item.id === row.id ? saved : item),
+      }));
+      setSelectedCustomer(current => current?.id === row.id ? saved : current);
+      setNotice(checked ? 'บันทึกผลค้นหา: ไม่พบข้อมูลช่องทางติดต่อแล้ว' : 'ยกเลิกเครื่องหมายผลค้นหาแล้ว');
+    } catch (cause) {
+      const failure = cause as { response?: { status?: number; data?: { error?: string } } };
+      const status = failure.response?.status;
+      const message = failure.response?.data?.error ||
+        (cause instanceof Error ? cause.message : 'บันทึกผลค้นหาไม่สำเร็จ');
+      if (status === 409) await load();
+      if (status === 401 || status === 403) {
+        setSheetStatus('error');
+        setSheetMessage('ไม่มีสิทธิ์บันทึก กรุณาตรวจสิทธิ์และโหลดหน้าใหม่');
+      }
+      setError(message);
+    } finally {
+      contactSearchLocks.current.delete(row.id);
+      setPendingContactSearch(current => {
+        const next = { ...current };
+        delete next[row.id];
+        return next;
+      });
+    }
+  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -544,10 +604,10 @@ export default function App() {
           placeholder={`ค้นหา${names[part]}`}
         />
         {error && (
-          <div className="error-banner">{error}<button onClick={() => setError('')}>ปิด</button></div>
+          <div className="error-banner" role="alert">{error}<button onClick={() => setError('')}>ปิด</button></div>
         )}
         {notice && (
-          <div className="success-banner">{notice}<button onClick={() => setNotice('')}>ปิด</button></div>
+          <div className="success-banner" role="status">{notice}<button onClick={() => setNotice('')}>ปิด</button></div>
         )}
         {selectedCustomer && part === 'customers' && (
           <div
@@ -590,7 +650,9 @@ export default function App() {
                   return (
                     <div className="detail-field" key={header}>
                       <span>{header}</span>
-                      <strong>{isBlank(value) ? '—' : String(value)}</strong>
+                      <strong>{header === CONTACT_SEARCH_HEADER
+                        ? displayValue('customers', index, value, data)
+                        : isBlank(value) ? '—' : String(value)}</strong>
                     </div>
                   );
                 })}
@@ -660,16 +722,40 @@ export default function App() {
                 <tr key={row.id}>
                   {columns[part].map(index => (
                     <td key={index}>
-                      {part === 'customers' && index === 2 ? (
-                        <button
+                      {part === 'customers' && index === companyNameIndex ? (
+                        <div className="company-registry-cell">
+                          <button
                           type="button"
                           className="company-name-button"
                           onClick={() => setSelectedCustomer(row)}
                           aria-haspopup="dialog"
-                          aria-label={`เปิดข้อมูลบริษัท ${String(row.values[2] || 'ไม่ระบุชื่อบริษัท')}`}
+                          aria-label={`เปิดข้อมูลบริษัท ${String(row.values[companyNameIndex] || 'ไม่ระบุชื่อบริษัท')}`}
                         >
                           {displayValue(part, index, row.values[index], data)}
-                        </button>
+                          </button>
+                          <label className="contact-search-control">
+                            <input
+                              type="checkbox"
+                              checked={pendingContactSearch[row.id] ?? isContactSearchChecked(row.values[contactSearchIndex])}
+                              disabled={loading || sheetStatus !== 'connected' || contactSearchLocks.current.has(row.id)}
+                              aria-label={`${CONTACT_SEARCH_LABEL} · ${row.id}`}
+                              aria-describedby={`contact-search-state-${encodeURIComponent(row.id)}`}
+                              onChange={event => void toggleContactSearch(row, event.target.checked)}
+                            />
+                            <span>{CONTACT_SEARCH_LABEL}</span>
+                          </label>
+                          <small
+                            id={`contact-search-state-${encodeURIComponent(row.id)}`}
+                            className="contact-search-state"
+                            role="status"
+                          >
+                            {contactSearchLocks.current.has(row.id)
+                              ? 'กำลังบันทึก…'
+                              : sheetStatus !== 'connected'
+                                ? 'ปิดการแก้ไข: ' + (sheetMessage || 'Google Sheets ยังไม่พร้อม')
+                                : 'บันทึกผลที่คุณตรวจแล้ว · เอาติ๊กออกเพื่อยกเลิกเครื่องหมาย'}
+                          </small>
+                        </div>
                       ) : (
                         displayValue(part, index, row.values[index], data)
                       )}
@@ -703,6 +789,9 @@ function customerName(data: Data, id: unknown) {
   );
 }
 function displayValue(part: Part, index: number, value: unknown, data: Data) {
+  if (part === 'customers' && specs.find(item => item.key === part)?.headers[index] === CONTACT_SEARCH_HEADER) {
+    return isContactSearchChecked(value) ? CONTACT_SEARCH_LABEL : 'ยังไม่ติ๊ก';
+  }
   if (value === null || value === undefined) return '—';
   if (
     (part === 'cases' || part === 'contacts' || part === 'tasks') &&

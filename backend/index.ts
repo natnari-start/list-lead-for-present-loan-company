@@ -7,6 +7,7 @@ import {
   secrets,
 } from '@appdeploy/sdk';
 import { schemas } from '../src/schema';
+import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-search-status';
 import { describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
@@ -114,6 +115,11 @@ export const handler = router({
       }
       const changed = (index: number) =>
         JSON.stringify(values[index] ?? null) !== JSON.stringify(expectedValues[index] ?? null);
+      const contactSearchIndex = spec.headers.indexOf(CONTACT_SEARCH_HEADER);
+      if (spec.key === 'customers' && contactSearchIndex >= 0 &&
+        changed(contactSearchIndex) && !isContactSearchValue(values[contactSearchIndex])) {
+        return error('ค่าผลค้นหา Google ต้องเป็น TRUE หรือ FALSE', 400);
+      }
       const formulaColumns = spec.key === 'tasks' ? [9] : [];
       if (formulaColumns.some(changed)) return error('ช่องคำนวณอัตโนมัติแก้ไขไม่ได้', 400);
       for (const index of spec.required || []) {

@@ -1,4 +1,5 @@
 import { secrets } from '@appdeploy/sdk';
+import { CONTACT_SEARCH_HEADER, isContactSearchChecked } from '../src/contact-search-status';
 
 type SheetSpec = {
   key: string;
@@ -308,6 +309,10 @@ function toIsoDate(value: unknown, locale: string, includeTime: boolean): unknow
 
 function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: string): unknown {
   if (value === null || value === undefined || value === '') return null;
+  if (spec.headers[index] === CONTACT_SEARCH_HEADER &&
+    (typeof value === 'boolean' || /^(TRUE|FALSE)$/i.test(String(value).trim()))) {
+    return isContactSearchChecked(value) ? 'TRUE' : 'FALSE';
+  }
   if (spec.dates?.includes(index)) {
     return toIsoDate(
       value,
@@ -418,8 +423,9 @@ function dateToSerial(value: unknown): number {
   return timestamp / 86400000 + 25569;
 }
 
-function toSheetsInput(value: unknown, index: number, spec: SheetSpec): string | number {
+function toSheetsInput(value: unknown, index: number, spec: SheetSpec): string | number | boolean {
   if (value === null || value === undefined || value === '') return '';
+  if (spec.headers[index] === CONTACT_SEARCH_HEADER) return isContactSearchChecked(value);
   if (spec.dates?.includes(index)) return dateToSerial(value);
   if (spec.numbers?.includes(index)) {
     const numeric = typeof value === 'number' ? value : Number(value);
@@ -431,7 +437,7 @@ function toSheetsInput(value: unknown, index: number, spec: SheetSpec): string |
 
 async function googleBatchUpdate(body: {
   valueInputOption: string;
-  data: Array<{ range: string; majorDimension: string; values: Array<Array<string | number>> }>;
+  data: Array<{ range: string; majorDimension: string; values: Array<Array<string | number | boolean>> }>;
 }): Promise<void> {
   const token = await createAccessToken();
   let response: Response;
@@ -479,6 +485,9 @@ export async function updateGoogleSheetsRecord(
   const metadata = await getMetadata();
   const sheet = (metadata.sheets || []).find(item => item.properties?.title === spec.sheetName);
   if (!sheet) throw new Error('ไม่พบแท็บ Google Sheets ที่ต้องการแก้ไข');
+  if (!headersMatch(await readHeader(spec), spec.headers)) {
+    throw new GoogleSheetsConflictError('หัวตารางถูกเปลี่ยน กรุณาตรวจโครงสร้างชีตก่อนบันทึก');
+  }
   const rowCount = sheet.properties?.gridProperties?.rowCount || 1;
   const lastColumn = columnName(spec.headers.length);
   const sheetRange = "'" + spec.sheetName.replace(/'/g, "''") + "'";
@@ -504,9 +513,9 @@ export async function updateGoogleSheetsRecord(
     throw new GoogleSheetsConflictError('รายการถูกผู้อื่นแก้ไขหลังจากโหลด กรุณารีเฟรชก่อนบันทึก');
   }
 
-  const updates: Array<{ range: string; majorDimension: string; values: Array<Array<string | number>> }> = [];
+  const updates: Array<{ range: string; majorDimension: string; values: Array<Array<string | number | boolean>> }> = [];
   let segmentStart = -1;
-  let segmentValues: Array<string | number> = [];
+  let segmentValues: Array<string | number | boolean> = [];
   const flush = (endIndex: number) => {
     if (segmentStart < 0) return;
     updates.push({
