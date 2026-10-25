@@ -3,7 +3,6 @@ import {
   json,
   type RouterMiddleware,
   requireAuth,
-  requireAdminEmailAllowlist,
   router,
   secrets,
 } from '@appdeploy/sdk';
@@ -41,7 +40,12 @@ const adminAllowlist: RouterMiddleware = async (ctx) => {
     return error('ยังไม่ได้ตั้งค่า ADMIN_EMAILS ใน AppDeploy secrets', 503);
   }
   if (!allowedEmails.length) return error('ADMIN_EMAILS ไม่มีบัญชีผู้ดูแลที่ถูกต้อง', 503);
-  return requireAdminEmailAllowlist(allowedEmails.map(email => email.trim().toLowerCase()))(ctx);
+  const userEmail = ctx.user?.email?.trim().toLowerCase();
+  if (!userEmail) return error('ไม่พบอีเมลผู้ใช้สำหรับตรวจสิทธิ์', 403);
+  const isAllowed = allowedEmails.some(
+    email => email.trim().toLowerCase() === userEmail
+  );
+  if (!isAllowed) return error('บัญชีนี้ไม่ได้รับอนุญาต', 403);
 };
 const auth: RouterMiddleware[] = [requireAuth(), adminAllowlist];
 
