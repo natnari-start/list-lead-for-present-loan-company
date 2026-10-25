@@ -58,6 +58,14 @@ globalThis.fetch = async (input, options = {}) => {
   const spec = schemas.find(item => range.startsWith("'" + item.sheetName + "'!"));
   assert.ok(spec, range);
   if (/!A1:.*1$/.test(range)) return response({ values: [spec.key === 'contacts' && badHeader ? spec.headers.map((header, index) => index === 7 ? 'Changed header' : header) : spec.headers] });
+  if (spec.key === 'contacts') {
+    return response({ values: data.contacts.map(row => row.map((value, index) => {
+      if (![indexes.contactedAt, indexes.verifiedAt].includes(index) || !value) return value;
+      if (url.searchParams.get('valueRenderOption') === 'UNFORMATTED_VALUE') return Date.parse(value + 'Z') / 86400000 + 25569;
+      const [date, time] = value.split('T'); const [year, month, day] = date.split('-');
+      return Number(month) + '/' + Number(day) + '/' + year + ' ' + time;
+    })) });
+  }
   return response({ values: data[spec.key] });
 };
 beforeEach(() => { data = structuredClone(initial); receipts = new Set(); writes = []; mode = ''; badHeader = false; reads = 0; });
@@ -78,6 +86,7 @@ describe('protected idempotent contact creation', () => {
     assert.equal(saved.record.values[indexes.contactedAt], '2026-10-25T09:15:00');
     assert.deepEqual(data.contacts[0], initial.contacts[0]);
     assert.equal((await invoke(body)).statusCode, 200);
+    assert.equal(JSON.parse((await invoke(body)).body).record.values[indexes.contactedAt], '2026-10-25T09:15:00', 'native M/d/yyyy display must not break replay under a Thai locale');
     assert.equal(writes.length, 1);
     assert.equal(data.contacts.length, 2);
     assert.deepEqual(data.customers, initial.customers);

@@ -258,13 +258,32 @@ async function getSpreadsheetId(): Promise<string> {
   return value;
 }
 
-async function valuesUrl(range: string): Promise<string> {
+async function valuesUrl(range: string, unformattedDates = false): Promise<string> {
   const spreadsheetId = await getSpreadsheetId();
   return 'https://sheets.googleapis.com/v4/spreadsheets/' +
     encodeURIComponent(spreadsheetId) +
     '/values/' +
     encodeURIComponent(range) +
-    '?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE';
+    '?majorDimension=ROWS&valueRenderOption=' +
+    (unformattedDates ? 'UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER' : 'FORMATTED_VALUE');
+}
+
+async function readRecordValues(range: string, spec: SheetSpec): Promise<ValuesResponse> {
+  const formatted = await googleGet<ValuesResponse>(await valuesUrl(range));
+  if (spec.key !== 'contacts') return formatted;
+  // Native table formats can be M/d/yyyy even when the workbook locale is Thai.
+  // Read only contact date values as numeric serials; keep formatted text/IDs.
+  // Match by stable ID so a concurrent sort cannot attach another row's date.
+  const numeric = await googleGet<ValuesResponse>(await valuesUrl(range, true));
+  const byId = new Map((numeric.values || []).filter(row => row[0]).map(row => [String(row[0]), row]));
+  return { values: (formatted.values || []).map(row => {
+    if (!row[0]) return row;
+    const source = byId.get(String(row[0]));
+    if (!source) throw new GoogleSheetsConflictError('ประวัติเปลี่ยนระหว่างอ่าน กรุณาโหลดข้อมูลใหม่');
+    const result = [...row];
+    for (const index of spec.dates || []) if (typeof source[index] === 'number') result[index] = source[index];
+    return result;
+  }) };
 }
 
 async function getMetadata(): Promise<SpreadsheetMetadata> {
@@ -291,6 +310,11 @@ function headersMatch(actual: unknown[] | undefined, expected: string[]): boolea
 
 function toIsoDate(value: unknown, locale: string, includeTime: boolean): unknown {
   if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(Math.round((value - 25569) * 86400000));
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toISOString().slice(0, includeTime ? 19 : 10);
+  }
   const raw = String(value).trim();
   const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (iso) {
@@ -391,7 +415,7 @@ export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetDat
     const lastColumn = columnName(spec.headers.length);
     const range = "'" + spec.sheetName.replace(/'/g, "''") + "'!A2:" + lastColumn + gridRows;
     const response = gridRows > 1
-      ? await googleGet<ValuesResponse>(await valuesUrl(range))
+      ? await readRecordValues(range, spec)
       : { values: [] };
     const rows = (response.values || [])
       .filter(row => row[0] !== null && row[0] !== undefined && String(row[0]).trim() !== '')
@@ -600,7 +624,7 @@ export async function updateGoogleSheetsRecord(
 
   const rowNumber = matchingRows[0].rowNumber;
   const rowRange = sheetRange + '!A' + rowNumber + ':' + lastColumn + rowNumber;
-  const currentResponse = await googleGet<ValuesResponse>(await valuesUrl(rowRange));
+  const currentResponse = await readRecordValues(rowRange, spec);
   const currentRow = spec.headers.map((_, index) =>
     normalizeValue(currentResponse.values?.[0]?.[index], index, spec, metadata.properties?.locale || 'th_TH')
   );

@@ -73,12 +73,17 @@ function addLine(text: string, line: string) {
   return text.includes(line) ? text : [text, line].filter(Boolean).join('\n');
 }
 
+const callbackPermissionPrefix = 'พนักงานระบุว่าลูกค้าอนุญาตให้ติดต่อกลับ';
+const callbackPlanPrefix = 'แผนติดต่อกลับ / รอยืนยันจากลูกค้า:';
+const withoutGeneratedCallback = (text: string) => text.split('\n')
+  .filter(line => !line.startsWith(callbackPermissionPrefix) && !line.startsWith(callbackPlanPrefix)).join('\n').trim();
+
 export function draftContact(form: ContactForm) {
   const full = fullContactOutcome(form.outcome);
   const callback = form.outcome === 'ขอคุยใหม่';
   const facts = form.facts.trim() || (form.outcome ? 'ผลการติดต่อ: ' + form.outcome : '');
-  let agreements = full || callback ? form.agreements.trim() : '';
-  let suggestions = full || callback ? form.suggestions.trim() : '';
+  let agreements = full || callback ? withoutGeneratedCallback(form.agreements) : '';
+  let suggestions = full || callback ? withoutGeneratedCallback(form.suggestions) : '';
   if (callback && (form.callbackAt || form.callbackChannel)) {
     const when = form.callbackAt ? form.callbackAt.replace('T', ' ') + ' น. (เวลาไทย)' : 'ยังไม่ยืนยันเวลา';
     const channel = form.callbackChannel || 'ยังไม่ยืนยันช่องทาง';

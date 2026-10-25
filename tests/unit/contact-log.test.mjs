@@ -55,4 +55,15 @@ describe('contact log mapping and local drafting', () => {
     assert.equal(emptyContactForm().callbackAllowed, false);
     assert.equal(emptyContactForm().verify, 'ยังไม่ตรวจ');
   });
+  it('rebuilds only generated callback lines when permission or appointment changes', () => {
+    const form = { ...example(), outcome: 'ขอคุยใหม่', callbackAt: '2026-10-26T10:00', callbackChannel: 'โทรศัพท์', callbackAllowed: true, agreements: 'ข้อตกลงที่พนักงานกรอกเอง' };
+    const applied = { ...form, ...draftContact(form) };
+    const removed = draftContact({ ...applied, callbackAllowed: false });
+    assert.equal(removed.agreements, 'ข้อตกลงที่พนักงานกรอกเอง');
+    assert.doesNotMatch(removed.agreements, /อนุญาต/);
+    assert.match(removed.suggestions, /รอยืนยัน/);
+    const changed = draftContact({ ...applied, callbackAt: '2026-10-27T11:00' });
+    assert.doesNotMatch(changed.agreements, /2026-10-26/);
+    assert.match(changed.agreements, /2026-10-27 11:00/);
+  });
 });

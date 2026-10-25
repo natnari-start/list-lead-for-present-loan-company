@@ -19,10 +19,18 @@ The contact datetime is a Bangkok wall time regardless of browser or workbook
 timezone, written as a native Sheets datetime serial and read back with seconds.
 No new creation-time column is introduced.
 
+Contact dates are read as native numeric serials in a second read and joined to
+the formatted text by stable contact ID. This preserves formatted text/IDs while
+avoiding ambiguous M/d/yyyy table displays under a Thai workbook locale, including
+when replaying a committed request or editing an existing contact.
+
 Short outcomes can save the employee-selected outcome as the factual summary
 without invented conversation details. Hidden agreements, suggestions and sales
 sheet fields are not sent. A callback permission sentence appears only after the
 employee explicitly selects its checkbox; it is not bank consent evidence.
+Regenerating a draft replaces only the template's own callback lines, so changing
+the appointment or removing permission cannot retain an obsolete generated claim.
+Employee-authored free text remains separate and is preserved.
 
 ## Idempotent create protocol
 
