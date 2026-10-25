@@ -103,6 +103,10 @@ No secret, permission or workbook timezone change is part of this release.
    open/cancel the Production form. Report physical phone vs simulated viewport
    explicitly. Record actual results and limitations in GitHub/Notion.
 
+The mobile footer reserves bottom space for the platform's floating toolbar.
+Verify the Save button's center hit target is the button, not a platform overlay,
+in portrait and landscape; checking bounding boxes alone is insufficient.
+
 Retain the pre-release AppDeploy snapshot for rollback. The previous reader can
 still read the same 15 headers and datetime values; rollback disables creation
 but does not require deleting new contacts or receipt metadata. Test any broader

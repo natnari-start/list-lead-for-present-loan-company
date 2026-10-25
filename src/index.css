@@ -34,12 +34,12 @@
 .contact-draft p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .contact-dialog .contact-dialog-footer { padding: 12px 20px max(12px, env(safe-area-inset-bottom)); margin: 0; border-top: 1px solid #e2e8f0; background: #fff; flex-shrink: 0; }
 .contact-dialog-footer small { margin-right: auto; color: #68778a; }
-@media (max-width: 600px) {
+@media (max-width: 780px) {
   .modal-backdrop.contact-dialog-backdrop { padding: 8px; }
   .modal.contact-dialog { max-height: calc(100dvh - 16px); }
   .contact-dialog .modal-head { padding: 14px 14px 10px; }
   .contact-dialog-scroll { padding: 4px 14px 16px; }
-  .contact-dialog .contact-dialog-footer { flex-wrap: wrap; padding: 10px 14px max(10px, env(safe-area-inset-bottom)); gap: 8px; }
+  .contact-dialog .contact-dialog-footer { flex-wrap: wrap; padding: 10px 14px max(76px, env(safe-area-inset-bottom)); gap: 8px; }
   .contact-dialog-footer small { flex-basis: 100%; }
   .contact-dialog-footer .button { min-height: 44px; flex: 1; white-space: normal; }
 }
