@@ -3,12 +3,15 @@ import {
   json,
   type RouterMiddleware,
   requireAuth,
+  requireAdminEmailAllowlist,
   router,
   secrets,
 } from '@appdeploy/sdk';
 import { schemas } from '../src/schema';
 import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-search-status';
-import { describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
+import { contactIndexes, validateContactValues } from '../src/contact-log';
+import { createHash } from 'node:crypto';
+import { createGoogleSheetsContact, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
   key: string;
@@ -38,12 +41,7 @@ const adminAllowlist: RouterMiddleware = async (ctx) => {
     return error('ยังไม่ได้ตั้งค่า ADMIN_EMAILS ใน AppDeploy secrets', 503);
   }
   if (!allowedEmails.length) return error('ADMIN_EMAILS ไม่มีบัญชีผู้ดูแลที่ถูกต้อง', 503);
-  const userEmail = ctx.user?.email?.trim().toLowerCase();
-  if (!userEmail) return error('ไม่พบอีเมลผู้ใช้สำหรับตรวจสิทธิ์', 403);
-  const isAllowed = allowedEmails.some(
-    email => email.trim().toLowerCase() === userEmail
-  );
-  if (!isAllowed) return error('บัญชีนี้ไม่ได้รับอนุญาต', 403);
+  return requireAdminEmailAllowlist(allowedEmails.map(email => email.trim().toLowerCase()))(ctx);
 };
 const auth: RouterMiddleware[] = [requireAuth(), adminAllowlist];
 
@@ -88,7 +86,37 @@ export const handler = router({
   ],
   'POST /api/records': [
     ...auth,
-    async () => error('รุ่นนี้เปิด Google Sheets แบบอ่านอย่างเดียว', 405),
+    async ({ body, user }) => {
+      const payload = body as { part?: unknown; requestId?: unknown; values?: unknown } | null;
+      if (payload?.part !== 'contacts') return error('รุ่นนี้เพิ่มได้เฉพาะประวัติการติดต่อ', 405);
+      const spec = SPECS.find(item => item.key === 'contacts')!;
+      if (typeof payload.requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(payload.requestId) || !Array.isArray(payload.values)) {
+        return error('รูปแบบคำขอสร้างประวัติไม่ถูกต้อง', 400);
+      }
+      const values = [...payload.values];
+      const invalid = validateContactValues(values, spec.headers);
+      if (invalid) return error(invalid, 400);
+      const indexes = contactIndexes(spec.headers);
+      if (values[indexes.id] !== null) return error('รหัสบันทึกต้องสร้างโดย backend', 400);
+      const hash = createHash('sha256').update(user!.userId + ':' + payload.requestId).digest('hex');
+      values[indexes.id] = 'CONTACT-' + hash.slice(0, 32).toUpperCase();
+      try {
+        // This is a shared CRM sheet, accessible only to the configured admins.
+        // The idempotency key is scoped to the authenticated user's stable ID.
+        const current = await loadGoogleSheetsData(SPECS);
+        if (!current.customers.some(row => row.id === values[indexes.customerId])) return error('กรุณาเลือกบริษัทที่มีอยู่ในทะเบียน', 400);
+        if (values[indexes.caseId]) {
+          const selected = current.cases.find(row => row.id === values[indexes.caseId]);
+          const customerIndex = SPECS.find(item => item.key === 'cases')!.headers.indexOf('รหัสลูกค้า');
+          if (!selected || selected.values[customerIndex] !== values[indexes.customerId]) return error('เคสที่เลือกไม่ตรงกับบริษัท', 400);
+        }
+        return json(await createGoogleSheetsContact(SPECS, hash, values));
+      } catch (cause) {
+        if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
+        const failure = describeGoogleSheetsFailure(cause);
+        return error('ยังยืนยันการบันทึกไม่ได้ กรุณาตรวจสอบคำขอเดิมอีกครั้ง: ' + failure.message, failure.status === 403 ? 403 : 502);
+      }
+    },
   ],
 
   'PUT /api/records/:part/:id': [

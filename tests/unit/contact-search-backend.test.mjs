@@ -34,6 +34,7 @@ const bundle = await build({
       export const secrets = { readSecret: name => globalThis.__contactSdk.readSecret(name) };
       export const router = routes => routes;
       export const requireAuth = () => context => context.user ? undefined : error('unauthorized', 401);
+      export const requireAdminEmailAllowlist = emails => context => emails.includes(context.user?.email?.toLowerCase()) ? undefined : error('forbidden', 403);
       export const json = (data, status = 200) => ({ statusCode: status, body: JSON.stringify(data) });
       export const error = (message, status = 500) => json({ error: message }, status);
     ` }));

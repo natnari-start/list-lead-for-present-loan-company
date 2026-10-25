@@ -1,5 +1,6 @@
 import { secrets } from '@appdeploy/sdk';
 import { CONTACT_SEARCH_HEADER, isContactSearchChecked } from '../src/contact-search-status';
+import { contactIndexes } from '../src/contact-log';
 
 type SheetSpec = {
   key: string;
@@ -24,11 +25,18 @@ type GoogleToken = {
 
 type SpreadsheetMetadata = {
   properties?: { title?: string; locale?: string };
+  namedRanges?: Array<{ namedRangeId?: string }>;
   sheets?: Array<{
     properties?: {
+      sheetId?: number;
       title?: string;
       gridProperties?: { rowCount?: number };
     };
+    tables?: Array<{
+      tableId?: string;
+      range?: { startColumnIndex?: number; endColumnIndex?: number };
+      columnProperties?: Array<{ columnIndex?: number; columnType?: string }>;
+    }>;
   }>;
 };
 
@@ -265,7 +273,7 @@ async function getMetadata(): Promise<SpreadsheetMetadata> {
     'https://sheets.googleapis.com/v4/spreadsheets/' +
       encodeURIComponent(spreadsheetId) +
       '?fields=' +
-      encodeURIComponent('properties(title,locale),sheets(properties(title,gridProperties(rowCount)))')
+      encodeURIComponent('properties(title,locale),namedRanges(namedRangeId),sheets(properties(sheetId,title,gridProperties(rowCount)),tables(tableId,range,columnProperties))')
   );
 }
 
@@ -403,6 +411,97 @@ export class GoogleSheetsConflictError extends Error {
     super(message);
     this.name = 'GoogleSheetsConflictError';
   }
+}
+
+// The receipt and the append share one atomic Sheets batch. A repeated receipt ID
+// makes the whole batch fail, including when requests reach different workers.
+export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+  const spec = specs.find(item => item.key === 'contacts');
+  if (!spec || !/^[a-f0-9]{64}$/.test(receiptHash)) throw new Error('คำขอสร้างประวัติไม่ถูกต้อง');
+  const indexes = contactIndexes(spec.headers);
+  const id = String(values[indexes.id]);
+  const receiptId = 'crm_contact_' + receiptHash;
+  const expected = values.map((value, index) => normalizeValue(value, index, spec, 'th_TH'));
+  const findSaved = async () => {
+    const rows = (await loadGoogleSheetsData([spec])).contacts.filter(row => row.id === id);
+    if (rows.length > 1) throw new GoogleSheetsConflictError('พบรหัสประวัติซ้ำ กรุณาตรวจสอบก่อนสร้างรายการใหม่');
+    const saved = rows[0];
+    if (saved && JSON.stringify(saved.values) !== JSON.stringify(expected)) {
+      throw new GoogleSheetsConflictError('คำขอเดิมมีข้อมูลบันทึกแล้ว แต่เนื้อหาไม่ตรงกับร่างนี้ กรุณารีเฟรชเพื่อตรวจรายการเดิม');
+    }
+    return saved;
+  };
+  const existing = await findSaved();
+  if (existing) return { record: existing, created: false, replayed: true };
+  const metadata = await getMetadata();
+  const sheet = metadata.sheets?.find(item => item.properties?.title === spec.sheetName);
+  const sheetId = sheet?.properties?.sheetId;
+  if (sheetId === undefined || !headersMatch(await readHeader(spec), spec.headers)) {
+    throw new GoogleSheetsConflictError('หัวตารางประวัติการติดต่อไม่ตรง กรุณาตรวจโครงสร้างชีตก่อนบันทึก');
+  }
+  if (metadata.namedRanges?.some(item => item.namedRangeId === receiptId)) {
+    throw new GoogleSheetsConflictError('คำขอนี้เคยถูกบันทึกแล้ว แต่ไม่พบแถวเดิม กรุณาตรวจประวัติก่อนสร้างรายการใหม่');
+  }
+  const table = sheet?.tables?.find(item => (item.range?.startColumnIndex || 0) === 0);
+  if (table && table.range?.endColumnIndex !== spec.headers.length) {
+    throw new GoogleSheetsConflictError('ตารางประวัติการติดต่อยังไม่ครอบคลุมทุกคอลัมน์ กรุณาดำเนินการ migration ก่อน');
+  }
+  if (table && (spec.dates || []).some(index =>
+    table.columnProperties?.find(column => (column.columnIndex || 0) === index)?.columnType !== 'DATE_TIME'
+  )) throw new GoogleSheetsConflictError('คอลัมน์วันเวลาต้องเป็น DATE_TIME กรุณาดำเนินการ migration ก่อน');
+
+  const quoted = "'" + spec.sheetName.replace(/'/g, "''") + "'";
+  const spreadsheetId = await getSpreadsheetId();
+  const template = await googleGet<{ sheets?: Array<{ data?: Array<{ rowData?: Array<{ values?: Array<{ userEnteredFormat?: Record<string, unknown>; dataValidation?: unknown }> }> }> }> }>(
+    'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + '?ranges=' +
+    encodeURIComponent(quoted + '!A2:' + columnName(spec.headers.length) + '2') +
+    '&includeGridData=true&fields=' + encodeURIComponent('sheets(data(rowData(values(userEnteredFormat,dataValidation))))')
+  );
+  const exemplar = template.sheets?.[0]?.data?.[0]?.rowData?.[0]?.values || [];
+  const cells = values.map((value, index) => {
+    const input = toSheetsInput(value, index, spec);
+    const format = exemplar[index]?.userEnteredFormat || {};
+    const textFormat = { ...(format.textFormat as Record<string, unknown> || { fontFamily: 'Arial', fontSize: 11 }) };
+    delete textFormat.link;
+    const userEnteredFormat: Record<string, unknown> = {
+      verticalAlignment: format.verticalAlignment || 'MIDDLE',
+      wrapStrategy: format.wrapStrategy || 'WRAP',
+      textFormat,
+    };
+    if (!table) userEnteredFormat.numberFormat = spec.dates?.includes(index)
+      ? { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' } : { type: 'TEXT' };
+    return {
+      userEnteredValue: typeof input === 'number' ? { numberValue: input } : { stringValue: String(input) },
+      userEnteredFormat,
+      ...(!table && exemplar[index]?.dataValidation ? { dataValidation: exemplar[index].dataValidation } : {}),
+    };
+  });
+  const requests = [
+    { addNamedRange: { namedRange: {
+      namedRangeId: receiptId, name: 'CRM_CONTACT_' + receiptHash,
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
+    } } },
+    { appendCells: {
+      ...(table?.tableId ? { tableId: table.tableId } : { sheetId }),
+      rows: [{ values: cells }],
+      fields: table ? 'userEnteredValue,userEnteredFormat(textFormat,verticalAlignment,wrapStrategy)' : 'userEnteredValue,userEnteredFormat,dataValidation',
+    } },
+  ];
+  try {
+    const token = await createAccessToken();
+    const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + ':batchUpdate', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests }),
+    });
+    if (!response.ok) throw new GoogleSheetsFailure(classifyGoogleFailure(response.status), response.status, 'contact_append_failed', 'write_api');
+  } catch (cause) {
+    // A response can be lost after commit. Read back this same stable ID; never
+    // retry with a fresh ID or write to an existing row as a recovery action.
+    const saved = await findSaved();
+    if (saved) return { record: saved, created: false, replayed: true };
+    throw cause;
+  }
+  return { record: { id, values: expected }, created: true, replayed: false };
 }
 
 function canonicalValue(value: unknown): unknown {

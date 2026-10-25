@@ -74,5 +74,25 @@
       "Close the profile without saving"
     ],
     "expected": "A read-only popup shows every customer field for the selected company, including empty fields as dashes, then closes without writing to Google Sheets."
+  },
+  {
+    "name": "Contact creation dialog opens and cancels without writing",
+    "viewport": "mobile",
+    "covers": [
+      "contact create dialog visibility",
+      "outcome-specific form",
+      "local draft preview without writes",
+      "manual Call Verify and DNC warning",
+      "no Production POST"
+    ],
+    "description": "Production-only read-only smoke; POST is intentionally excluded here and covered by the synthetic suite.",
+    "steps": [
+      "Sign in with the authorized Google account and open ประวัติการติดต่อ",
+      "Click เพิ่มรายการ without selecting a real customer or entering real contact notes",
+      "Inspect the six outcomes, optional collapsed ก่อนติดต่อ section and sticky footer",
+      "Confirm a red Call Verify selection shows a warning but does not claim a check was performed automatically",
+      "Cancel without saving, calling a customer, creating a task or following an external search"
+    ],
+    "expected": "The new dialog is usable and closes without any Production row write; authenticated create and replay are tested only on synthetic data."
   }
 ]

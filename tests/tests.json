@@ -1,6 +1,6 @@
 [
   {
-    "name": "Authorized admin opens and safely cancels a Google Sheets edit",
+    "name": "Authorized admin inspects existing CRM workflows and cancels safely",
     "sanity": true,
     "viewport": "desktop",
     "covers": [
@@ -14,7 +14,9 @@
       "customer, case, contact, task, document navigation",
       "company detail popup",
       "all customer registry fields",
-      "read-only company details"
+      "read-only company details",
+      "manual contact-search control",
+      "company Google Search link"
     ],
     "description": "Checks an authorized admin can open the form for an existing sheet record, see protected fields, and cancel without changing the sheet.",
     "steps": [
@@ -25,48 +27,88 @@
       "Close the company profile",
       "Open the edit form for a visible record",
       "Confirm the record identifier is read only",
-      "Cancel the form without saving"
+      "Cancel the form without saving",
+      "Inspect the separate manual Google contact-search checkbox without changing it",
+      "Inspect the company Google Search link attributes without following a production company search"
     ],
     "expected": "The edit form shows the selected record and read-only identifier; cancel closes the form and leaves the source data unchanged."
   },
   {
-    "name": "Google Sheets access failure shows the failing stage",
+    "name": "Create and retain one synthetic contact history",
     "viewport": "mobile",
     "covers": [
-      "Google Sheets API errors",
-      "credential and network diagnostics",
-      "schema mismatch distinction",
-      "no silent Sandbox fallback"
+      "POST /api/records contacts",
+      "stable customer/case references",
+      "Google Sheets append and reload persistence",
+      "Bangkok datetime",
+      "atomic idempotency receipt",
+      "no automatic task or customer update"
     ],
-    "description": "Checks a failed source connection identifies whether authentication, API access, or schema validation failed without exposing secrets.",
+    "description": "Creates a new contact only in the isolated synthetic app and verifies durable storage without altering prior rows.",
     "steps": [
-      "Sign in while Google Sheets access is unavailable",
-      "Wait for the data request and connection status to settle"
+      "Use only the synthetic test app and SYN-TEST-CUST-001 / SYN-TEST-CASE-001; never run writes on Production",
+      "Sign in, open ประวัติการติดต่อ and choose เพิ่มรายการ",
+      "Select the synthetic customer and matching case, set a Thai contact time, channel โทรศัพท์ and outcome ติดต่อไม่ได้",
+      "Enter a uniquely labelled synthetic note and save; click twice while pending",
+      "Wait for backend-confirmed success and refresh",
+      "Read the test sheet: exactly one matching CONTACT ID exists, its date/time matches the form, and existing rows/customers/tasks are unchanged"
     ],
-    "expected": "The app distinguishes a connection or credential failure from a header mismatch and does not show Sandbox records."
+    "expected": "One new synthetic contact persists after reload, with no duplicate, invented agreement, Sales Sheet or consent."
   },
   {
-    "name": "Draft company name controls the Google Search link",
+    "name": "All six contact outcomes and reviewed local draft",
     "viewport": "mobile",
     "covers": [
-      "company Google Search link",
-      "unsaved company-name edits",
-      "blank company-name guard",
-      "safe external link attributes",
-      "cancel without writing"
+      "six outcome branches",
+      "hidden optional fields",
+      "two-minute no-answer workflow",
+      "draft preview and explicit apply",
+      "no invented permission",
+      "keyboard focus",
+      "sticky mobile footer",
+      "legacy JSON hidden"
     ],
-    "description": "Checks the customer edit header uses the current synthetic company name for Google Search while preserving editable form values.",
+    "description": "Inspects all outcome forms and draft behavior without saving.",
     "steps": [
-      "Use only an isolated synthetic-data test app containing SYN-TEST-CUST-001, not production customer records",
-      "Sign in with the authorized test account and open the edit form for SYN-TEST-CUST-001",
-      "Change the company name to บริษัท ทดสอบ เอสเอ็มอี จำกัด without saving",
-      "Inspect the header link: its Google query must match the trimmed name, its target must be _blank and its rel must contain noopener noreferrer",
-      "Change the name to บริษัท ทดสอบ A&B จำกัด and confirm the link query updates without changing the input or closing the form",
-      "Open the header link using only this synthetic company name, verify Google opens in a new tab with the matching query, and return to confirm the unsaved form values are unchanged",
-      "Clear the company name and confirm the search link is hidden",
+      "Use the synthetic test app, open เพิ่มรายการ and select the synthetic customer",
+      "Inspect ติดต่อไม่ได้, ขอคุยใหม่, สนใจ, ติดตามสถานะ, ไม่สนใจครั้งนี้ and ขอไม่ให้ติดต่ออีก",
+      "Confirm hidden agreements/Sales Sheet are not required and raw JSON, BANT/MEDDIC and new income fields are absent",
+      "For ขอคุยใหม่ enter a callback date without selecting permission, then choose ช่วยร่างบันทึก",
+      "Verify the preview labels the callback as awaiting confirmation and creates no permission statement; inspect it and apply explicitly",
+      "Check keyboard focus/Tab/Escape and a 375px mobile viewport; confirm the save footer remains available while the body scrolls",
       "Cancel without saving"
     ],
-    "expected": "Only the customer edit header has the Google Search link; it follows the current Thai draft name, safely encodes special characters, hides when blank and never writes data during this test."
+    "expected": "Only relevant fields appear, drafting uses provided text locally with review before apply, consent is not inferred and cancellation writes nothing."
+  },
+  {
+    "name": "Failed contact creation retains draft and retries the same request",
+    "viewport": "desktop",
+    "covers": [
+      "POST /api/records failure",
+      "retained input",
+      "repeat-submit protection",
+      "no false success",
+      "same-key retry"
+    ],
+    "description": "Injects a synthetic save failure and verifies recovery controls retain the original request.",
+    "qa_faults": [
+      {
+        "method": "POST",
+        "path": "/api/records",
+        "status": 502,
+        "body_json": {
+          "error": "Synthetic contact create failure"
+        }
+      }
+    ],
+    "steps": [
+      "Use only the isolated synthetic app, sign in and open เพิ่มรายการ",
+      "Select SYN-TEST-CUST-001, enter a short no-answer contact and save",
+      "Wait for the injected failure; confirm the form remains with its original values and no success is shown",
+      "Inspect the retry action: it uses the original immutable request payload rather than creating a new record identity",
+      "Cancel and verify the synthetic sheet has no new row from the rejected request"
+    ],
+    "expected": "The draft is retained, repeated clicks create no extra request while pending, and no successful write is claimed."
   },
   {
     "name": "Manual Google contact-search mark persists for one synthetic customer",
@@ -88,33 +130,5 @@
       "Uncheck SYN-TEST-CUST-001 and refresh; confirm the mark is removed and neither company gained changed contact details"
     ],
     "expected": "The selected synthetic customer retains its mark after refresh and in another view, then retains the unmarked result; the duplicate-name row is unchanged and checkbox interaction opens no dialog or Google tab."
-  },
-  {
-    "name": "Failed contact-search write restores the previously confirmed mark",
-    "viewport": "desktop",
-    "covers": [
-      "failed write rollback",
-      "visible save error",
-      "no false success",
-      "repeat-click protection"
-    ],
-    "description": "Injects an update failure and verifies the checkbox returns to its previous confirmed state.",
-    "qa_faults": [
-      {
-        "method": "PUT",
-        "path": "/api/records/customers/SYN-TEST-CUST-001",
-        "status": 502,
-        "body_json": {
-          "error": "Synthetic contact-search save failure"
-        }
-      }
-    ],
-    "steps": [
-      "Use only the isolated synthetic test app with SYN-TEST-CUST-001",
-      "Sign in, note the current confirmed checkbox state and toggle it",
-      "Wait for the injected failure and inspect the customer register",
-      "Refresh and verify the source state is unchanged"
-    ],
-    "expected": "A visible error is shown, no success is claimed, and the checkbox and sheet remain at the previous confirmed state."
   }
 ]

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
+import ContactLogDialog from './ContactLogDialog';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
@@ -75,6 +76,7 @@ export default function App() {
   const [data, setData] = useState<Data>(blankData());
   const [query, setQuery] = useState('');
   const [record, setRecord] = useState<Row | null>(null);
+  const [contactContext, setContactContext] = useState<{ customerId?: string; caseId?: string } | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
@@ -205,6 +207,15 @@ export default function App() {
       )
   ).length;
 
+  const beginContact = (context: { customerId?: string; caseId?: string } = {}) => {
+    setSelectedCustomer(null);
+    setRecord(null);
+    setPart('contacts');
+    setQuery('');
+    setContactContext(context);
+    setError('');
+    setNotice('');
+  };
   const beginAdd = () => {
     const initial = spec.headers.map((_, index) => {
       if (index === 0)
@@ -473,7 +484,7 @@ export default function App() {
     setLoading(true);
     setError('');
     try {
-      const result = await auth.signIn({ scope: 'openid email profile' });
+      const result = await auth.signIn({ scope: 'openid email profile offline_access' });
       await api.get('/api/session');
       setUser(result.user);
     } catch (cause) {
@@ -543,7 +554,7 @@ export default function App() {
                     ? 'หัวตารางไม่ตรง ระบบหยุดโหลดข้อมูล'
                     : 'เชื่อมต่อไม่สำเร็จ ระบบไม่ใช้ข้อมูล Sandbox'}
               {sheetMessage && sheetStatus !== 'connected' ? ' · ' + sheetMessage : ''}
-              {sheetStatus === 'connected' ? ' · แก้ไขรายการเดิมได้' : ' · ปิดการแก้ไขจนกว่าจะเชื่อมต่อสำเร็จ'}
+              {sheetStatus === 'connected' ? ' · แก้ไขรายการเดิมและเพิ่มประวัติการติดต่อได้' : ' · ปิดการแก้ไขจนกว่าจะเชื่อมต่อสำเร็จ'}
             </p>
           </div>
         </section>
@@ -594,7 +605,9 @@ export default function App() {
             >
               รีเฟรช
             </button>
-            <small className="small-note">แก้ไขรายการเดิมได้ · ไม่มีปุ่มเพิ่มหรือลบรายการ</small>
+            {part === 'contacts' ? (
+              <button className="button primary" data-add-contact type="button" onClick={() => beginContact()} disabled={loading || sheetStatus !== 'connected'}>เพิ่มรายการ</button>
+            ) : <small className="small-note">เพิ่มประวัติการติดต่อได้จากแท็บประวัติการติดต่อ</small>}
           </div>
         </section>
         <input
@@ -609,6 +622,16 @@ export default function App() {
         {notice && (
           <div className="success-banner" role="status">{notice}<button onClick={() => setNotice('')}>ปิด</button></div>
         )}
+        {contactContext && <ContactLogDialog
+          customers={data.customers} cases={data.cases} context={contactContext}
+          disabled={loading || sheetStatus !== 'connected'}
+          onClose={() => setContactContext(null)}
+          onSaved={(saved, replayed) => {
+            setData(current => ({ ...current, contacts: [...current.contacts.filter(row => row.id !== saved.id), saved] }));
+            setContactContext(null);
+            setNotice(replayed ? 'ยืนยันรายการเดิมใน Google Sheets แล้ว ไม่สร้างรายการซ้ำ' : 'บันทึกประวัติใหม่ลง Google Sheets แล้ว');
+          }}
+        />}
         {selectedCustomer && part === 'customers' && (
           <div
             className="modal-backdrop"
@@ -658,6 +681,7 @@ export default function App() {
                 })}
               </div>
               <div className="modal-foot">
+                <button className="button primary" type="button" disabled={loading || sheetStatus !== 'connected'} onClick={() => beginContact({ customerId: selectedCustomer.id })}>เพิ่มประวัติการติดต่อ</button>
                 <button
                   className="button"
                   type="button"
@@ -693,7 +717,7 @@ export default function App() {
               <p className="small-note">การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets · รหัสรายการและช่องคำนวณอัตโนมัติแก้ไขไม่ได้</p>
               {error && <div className="error-banner">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
               <div className="form-grid">
-                {spec.headers.map((header, index) => (
+                {spec.headers.map((header, index) => part === 'contacts' && header === 'รายละเอียดธุรกิจจากการติดต่อ (JSON)' ? null : (
                   <label className={spec.longText?.includes(index) || header.length > 38 ? 'wide' : ''} key={header}>
                     <span>{header}{spec.required.includes(index) ? <b className="required"> *</b> : ''}</span>
                     {makeFormControl(index)}
@@ -761,7 +785,7 @@ export default function App() {
                       )}
                     </td>
                   ))}
-                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button></td>}
+                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
                 </tr>
               ))}
               {!visibleRows.length && (
