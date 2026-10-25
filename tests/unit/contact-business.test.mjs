@@ -50,6 +50,21 @@ describe('structured contact data without column migration', () => {
     assert.equal(contactValues(edited)[ix.facts], edited.facts);
     assert.equal(contactValues(edited)[ix.agreements], null);
   });
+  it('rebuilds generated plan/answer lines without stale duplicates while retaining free text', () => {
+    const form = example();
+    form.fundingPlan = 'มีแผน';
+    form.questionsAsked = true;
+    form.answers.monthlySales = '123 บาท';
+    const applied = { ...form, ...draftContact(form) };
+    assert.deepEqual(draftContact(applied), draftContact(form));
+    applied.fundingPlan = 'ยังไม่ทราบ';
+    applied.answers.monthlySales = '456 บาท';
+    const changed = draftContact(applied);
+    assert.doesNotMatch(changed.facts, /123 บาท|แผนใช้เงิน: มีแผน/);
+    assert.match(changed.facts, /^แผนใช้เงิน: ยังไม่ทราบ/);
+    assert.match(changed.facts, /456 บาท/);
+    assert.match(changed.facts, /ลูกค้าแจ้งข้อมูลสังเคราะห์/);
+  });
   it('omits all hidden business data for short outcomes and rejects hidden data at the backend boundary', () => {
     const form = example();
     form.questionsAsked = true;

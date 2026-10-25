@@ -83,7 +83,8 @@ const withoutGeneratedCallback = (text: string) => text.split('\n')
 export function draftContact(form: ContactForm) {
   const full = fullContactOutcome(form.outcome);
   const callback = form.outcome === 'ขอคุยใหม่';
-  let facts = form.facts.trim();
+  const generatedPrefixes = ['แผนใช้เงิน: ', ...BUSINESS_QUESTIONS.map(([, label]) => label + ': ')];
+  let facts = form.facts.split('\n').filter(line => !generatedPrefixes.some(prefix => line.startsWith(prefix))).join('\n').trim();
   if (form.fundingPlan && (full || callback)) facts = addLine('แผนใช้เงิน: ' + form.fundingPlan, facts);
   if (full && form.questionsAsked) {
     for (const [key, label] of BUSINESS_QUESTIONS) {
