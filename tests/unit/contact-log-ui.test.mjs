@@ -64,7 +64,39 @@ it('opens outcome-specific fields, reviews local drafts, keeps failed input and 
     assert.doesNotMatch(preview.textContent, /ลูกค้าอนุญาต/);
     await click(button('นำร่างที่ตรวจแล้วไปใช้ในฟอร์ม'));
     assert.match(field('ข้อเสนอแนะ / รอตรวจ').value, /รอยืนยันจากลูกค้า/);
+    await set('ผลการติดต่อ *', 'สนใจ');
+    await set('แผนใช้เงินตามที่ลูกค้าแจ้ง (ถ้าทราบ)', 'มีแผน');
+    const questionsCheck = [...document.querySelectorAll('label')].find(node => node.textContent.includes('ได้สอบถามข้อมูลธุรกิจแล้ว')).querySelector('input');
+    await click(questionsCheck);
+    await set('ประเภทธุรกิจตามที่ลูกค้าแจ้ง', 'บริการทดสอบ — ลูกค้าแจ้ง');
+    await set('ยอดขายต่อเดือนตามที่ลูกค้าแจ้ง', '123 บาท — ข้อมูลสังเคราะห์');
+    await set('อายุธุรกิจ — คู่มือระบุขัดกัน 6 ปีกับ 8 ปี', 'ไม่ผ่านตามที่พนักงานเห็น');
+    await set('ขั้นเอกสาร', 'ขอ Prescreen');
+    assert.match(document.querySelector('form').textContent, /เกณฑ์ระบุ 8 ปีขึ้นไป/);
+    await set('ข้อเท็จจริง *', 'ข้อความเดิมที่ห้ามเขียนทับโดยไม่ยืนยัน');
+    await click(button('ช่วยร่างบันทึก'));
+    assert.equal(field('ข้อเท็จจริง *').value, 'ข้อความเดิมที่ห้ามเขียนทับโดยไม่ยืนยัน');
+    assert.equal(calls.length, 0);
+    await set('ร่างข้อเท็จจริง — แก้ไขก่อนใช้', 'ร่างสังเคราะห์ที่ตรวจแก้แล้ว');
+    window.confirm = () => false;
+    await click(button('นำร่างที่ตรวจแล้วไปใช้ในฟอร์ม'));
+    assert.equal(field('ข้อเท็จจริง *').value, 'ข้อความเดิมที่ห้ามเขียนทับโดยไม่ยืนยัน');
+    window.confirm = () => true;
+    await click(button('นำร่างที่ตรวจแล้วไปใช้ในฟอร์ม'));
+    assert.equal(field('ข้อเท็จจริง *').value, 'ร่างสังเคราะห์ที่ตรวจแก้แล้ว');
+    // Submitting unchanged reviewed text does not regenerate template content.
+    await submit();
+    const structuredSave = calls[0].body;
+    assert.equal(structuredSave.values[contactIndexes().facts], 'ร่างสังเคราะห์ที่ตรวจแก้แล้ว');
+    const business = JSON.parse(structuredSave.values[contactIndexes().businessJson]).crmContactV1;
+    assert.equal(business.answers.monthlySales, '123 บาท — ข้อมูลสังเคราะห์');
+    assert.equal(business.quality.businessAge, 'ไม่ผ่านตามที่พนักงานเห็น');
+    assert.equal(business.documentStage, 'ขอ Prescreen');
+    assert.equal(business.quality.entity, 'ยังไม่ทราบ');
+    calls.length = 0; saved.length = 0;
     await set('ผลการติดต่อ *', 'ติดต่อไม่ได้');
+    assert.equal(field('แผนใช้เงินตามที่ลูกค้าแจ้ง (ถ้าทราบ)'), undefined);
+    assert.equal(field('ประเภทธุรกิจตามที่ลูกค้าแจ้ง'), undefined);
     await set('หมายเหตุสั้น (ถ้ามี)', 'ข้อความสังเคราะห์ที่ต้องคงอยู่เมื่อบันทึกล้มเหลว');
     fault = true;
     let release; gate = new Promise(resolve => { release = resolve; });
@@ -93,3 +125,4 @@ it('opens outcome-specific fields, reviews local drafts, keeps failed input and 
     dom.window.close(); delete globalThis.__contactLogUi;
   }
 });
+

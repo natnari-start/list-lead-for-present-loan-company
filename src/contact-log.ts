@@ -1,7 +1,8 @@
+import { BUSINESS_QUESTIONS, businessData, emptyBusinessForm, mergeBusinessJson, validateBusinessJson, type BusinessForm } from './contact-business.ts';
 import { schemas } from './schema.ts';
 
 export type ContactRow = { id: string; values: unknown[] };
-export type ContactForm = {
+export type ContactForm = BusinessForm & {
   customerId: string;
   caseId: string;
   contactedAt: string;
@@ -62,6 +63,7 @@ export const fullContactOutcome = (outcome: string) => ['สนใจ', 'ติ�
 
 export function emptyContactForm(context: { customerId?: string; caseId?: string } = {}): ContactForm {
   return {
+    ...emptyBusinessForm(),
     customerId: context.customerId || '', caseId: context.caseId || '', contactedAt: bangkokDateTime(),
     channel: '', person: '', outcome: '', facts: '', agreements: '', suggestions: '',
     callbackAt: '', callbackChannel: '', callbackAllowed: false, productPresented: false,
@@ -70,7 +72,7 @@ export function emptyContactForm(context: { customerId?: string; caseId?: string
 }
 
 function addLine(text: string, line: string) {
-  return text.includes(line) ? text : [text, line].filter(Boolean).join('\n');
+  return !line || text.includes(line) ? text : [text, line].filter(Boolean).join('\n');
 }
 
 const callbackPermissionPrefix = 'พนักงานระบุว่าลูกค้าอนุญาตให้ติดต่อกลับ';
@@ -81,7 +83,13 @@ const withoutGeneratedCallback = (text: string) => text.split('\n')
 export function draftContact(form: ContactForm) {
   const full = fullContactOutcome(form.outcome);
   const callback = form.outcome === 'ขอคุยใหม่';
-  const facts = form.facts.trim() || (form.outcome ? 'ผลการติดต่อ: ' + form.outcome : '');
+  let facts = form.facts.trim();
+  if (form.fundingPlan && (full || callback)) facts = addLine('แผนใช้เงิน: ' + form.fundingPlan, facts);
+  if (full && form.questionsAsked) {
+    for (const [key, label] of BUSINESS_QUESTIONS) {
+      if (form.answers[key].trim()) facts = addLine(facts, label + ': ' + form.answers[key].trim());
+    }
+  }
   let agreements = full || callback ? withoutGeneratedCallback(form.agreements) : '';
   let suggestions = full || callback ? withoutGeneratedCallback(form.suggestions) : '';
   if (callback && (form.callbackAt || form.callbackChannel)) {
@@ -100,13 +108,19 @@ export function draftContact(form: ContactForm) {
 
 export function contactValues(form: ContactForm, headers: readonly string[] = contactSpec.headers) {
   const indexes = contactIndexes(headers);
-  const text = draftContact(form);
+  // Saving uses reviewed form text; drafting is an explicit separate action.
+  const full = fullContactOutcome(form.outcome);
+  const callback = form.outcome === 'ขอคุยใหม่';
   const values: Array<string | null> = headers.map(() => null);
   const set = (key: keyof typeof indexes, value: string) => { values[indexes[key]] = value.trim() || null; };
   for (const key of ['customerId', 'caseId', 'contactedAt', 'channel', 'person', 'outcome', 'verify', 'verifiedAt', 'evidence'] as const) set(key, form[key]);
-  set('facts', text.facts);
-  set('agreements', text.agreements);
-  set('suggestions', text.suggestions);
+  set('facts', form.facts.trim() || (!full && form.outcome ? 'ผลการติดต่อ: ' + form.outcome : ''));
+  if (full || callback) {
+    set('agreements', form.agreements);
+    set('suggestions', form.suggestions);
+    const data = businessData(form, full, callback, form.callbackAt, form.callbackChannel);
+    values[indexes.businessJson] = mergeBusinessJson(null, data);
+  }
   if (fullContactOutcome(form.outcome) && form.productPresented) set('salesSheet', form.salesSheet);
   return values;
 }
@@ -124,6 +138,19 @@ export function validateContactValues(values: unknown[], headers: readonly strin
     const choices = contactSpec.options[String(indexes[key])];
     if (value(key) && !choices?.includes(value(key))) return 'ค่าของช่อง ' + contactHeaders[key] + ' ไม่อยู่ในรายการ';
   }
-  if (value('businessJson')) return 'รายการใหม่ไม่รับข้อมูล JSON จากแบบฟอร์มนี้';
+  const fullOutcome = fullContactOutcome(value('outcome'));
+  const callbackOutcome = value('outcome') === 'ขอคุยใหม่';
+  if (!fullOutcome && !callbackOutcome && (value('agreements') || value('suggestions'))) return 'ผลการติดต่อนี้ไม่รับข้อตกลงหรือข้อเสนอแนะเพื่อขาย';
+  if (!fullOutcome && value('salesSheet')) return 'ผลการติดต่อนี้ไม่รับรุ่น Sales Sheet';
+  if (value('businessJson')) {
+    const full = fullContactOutcome(value('outcome'));
+    const callback = value('outcome') === 'ขอคุยใหม่';
+    if (!full && !callback) return 'ผลการติดต่อนี้ไม่รับข้อมูลธุรกิจ JSON';
+    const invalid = validateBusinessJson(value('businessJson'), full, callback);
+    if (invalid) return invalid;
+    const data = JSON.parse(value('businessJson')).crmContactV1;
+    if (data.callback?.at && !isContactDateTime(data.callback.at)) return 'กรุณาตรวจวันเวลาติดต่อกลับ';
+  }
   return '';
 }
+

@@ -42,18 +42,24 @@
       "Google Sheets append and reload persistence",
       "Bangkok datetime",
       "atomic idempotency receipt",
-      "no automatic task or customer update"
+      "no automatic task or customer update",
+      "structured business JSON round-trip",
+      "funding plan and five optional answers",
+      "employee quality observations are not approval",
+      "document stage without case changes",
+      "reviewed draft text is saved verbatim"
     ],
     "description": "Creates a new contact only in the isolated synthetic app and verifies durable storage without altering prior rows.",
     "steps": [
       "Use only the synthetic test app and SYN-TEST-CUST-001 / SYN-TEST-CASE-001; never run writes on Production",
       "Sign in, open ประวัติการติดต่อ and choose เพิ่มรายการ",
-      "Select the synthetic customer and matching case, set a Thai contact time, channel โทรศัพท์ and outcome ติดต่อไม่ได้",
-      "Enter a uniquely labelled synthetic note and save; click twice while pending",
+      "Select SYN-TEST-CUST-001 and matching SYN-TEST-CASE-001, a Thai contact time, โทรศัพท์ and outcome สนใจ; explicitly select funding plan มีแผน",
+      "Open ได้สอบถามข้อมูลธุรกิจแล้ว, enter synthetic business type บริการทดสอบ and monthly sales 123 บาท — ข้อมูลสังเคราะห์; leave the other answers blank. In quality observations choose ไม่ผ่านตามที่พนักงานเห็น for business age, inspect the 6/8-year warning and choose ขอ Prescreen for document stage",
+      "Enter synthetic facts, preview with ช่วยร่างบันทึก, edit the draft facts to PHASE2-SYNTHETIC-STRUCTURED and explicitly apply; save twice while pending",
       "Wait for backend-confirmed success and refresh",
       "Read the test sheet: exactly one matching CONTACT ID exists, its date/time matches the form, and existing rows/customers/tasks are unchanged"
     ],
-    "expected": "One new synthetic contact persists after reload, with no duplicate, invented agreement, Sales Sheet or consent."
+    "expected": "Exactly one matching synthetic contact persists after refresh with reviewed facts and crmContactV1 JSON in column O; missing answers stay absent, unknown quality remains unknown and the failed observation does not block saving. Prior histories, legacy JSON, customers, cases, tasks and document rows are unchanged."
   },
   {
     "name": "All six contact outcomes and reviewed local draft",
@@ -66,15 +72,21 @@
       "no invented permission",
       "keyboard focus",
       "sticky mobile footer",
-      "legacy JSON hidden"
+      "legacy JSON hidden",
+      "editable preview",
+      "explicit overwrite confirmation",
+      "unknown quality defaults",
+      "no automatic qualification",
+      "DNC and red Call Verify never offer sales tasks"
     ],
     "description": "Inspects all outcome forms and draft behavior without saving.",
     "steps": [
       "Use the synthetic test app, open เพิ่มรายการ and select the synthetic customer",
       "Inspect ติดต่อไม่ได้, ขอคุยใหม่, สนใจ, ติดตามสถานะ, ไม่สนใจครั้งนี้ and ขอไม่ให้ติดต่ออีก",
-      "Confirm hidden agreements/Sales Sheet are not required and raw JSON, BANT/MEDDIC and new income fields are absent",
+      "Confirm no-answer, no-interest and DNC outcomes hide business questions, quality and document stage; hidden fields are not required and raw JSON/BANT/MEDDIC are absent",
       "For ขอคุยใหม่ enter a callback date without selecting permission, then choose ช่วยร่างบันทึก",
       "Verify the preview labels the callback as awaiting confirmation and creates no permission statement; inspect it and apply explicitly",
+      "For สนใจ inspect the five optional questions and eight optional employee observations, then use and edit the local preview; cancel replacement to keep the original text, then explicitly confirm applying it",
       "Check keyboard focus/Tab/Escape and a 375px mobile viewport; confirm the save footer remains available while the body scrolls",
       "Cancel without saving"
     ],
@@ -132,3 +144,4 @@
     "expected": "The selected synthetic customer retains its mark after refresh and in another view, then retains the unmarked result; the duplicate-name row is unchanged and checkbox interaction opens no dialog or Google tab."
   }
 ]
+

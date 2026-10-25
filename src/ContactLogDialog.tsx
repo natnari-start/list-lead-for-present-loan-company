@@ -1,3 +1,4 @@
+import { BUSINESS_QUESTIONS, DOCUMENT_STAGES, FUNDING_PLANS, QUALITY_CRITERIA, QUALITY_RESULTS } from './contact-business';
 import { useEffect, useRef, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
@@ -28,6 +29,8 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
   const lock = useRef(false);
   const submitted = useRef<Payload | null>(null);
   const dirty = useRef(false);
+  const reviewedInputs = useRef<string | null>(null);
+  const draftInputs = (value: ContactForm) => JSON.stringify({ outcome: value.outcome, callbackAllowed: value.callbackAllowed, callbackAt: value.callbackAt, callbackChannel: value.callbackChannel, fundingPlan: value.fundingPlan, questionsAsked: value.questionsAsked, answers: value.answers });
   const close = useRef(onClose);
   close.current = onClose;
 
@@ -60,6 +63,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
 
   const set = <K extends keyof ContactForm>(key: K, value: ContactForm[K]) => {
     dirty.current = true;
+    if (['facts', 'agreements', 'suggestions'].includes(key)) reviewedInputs.current = null;
     setDraft(null);
     setForm(current => ({ ...current, [key]: value,
       ...(key === 'customerId' ? { caseId: '', person: '' } : {}),
@@ -88,6 +92,10 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
     const validation = validateContactValues(values);
     if (!submitted.current || !uncertain) {
       if (validation) { setError(validation); return; }
+      if ((full || callback) && reviewedInputs.current && reviewedInputs.current !== draftInputs(form)) {
+        setError('ข้อมูลสำหรับร่างเปลี่ยนแล้ว กรุณาช่วยร่างและตรวจใหม่ หรือแก้ข้อความบันทึกด้วยตนเองก่อนบันทึก');
+        return;
+      }
       if (!customers.some(row => row.id === form.customerId)) { setError('กรุณาเลือกบริษัทที่มีอยู่'); return; }
       if (form.caseId && !matchingCases.some(row => row.id === form.caseId)) { setError('เคสที่เลือกไม่ตรงกับบริษัท'); return; }
       if (full && !form.facts.trim()) { setError('กรุณาระบุข้อเท็จจริงที่ทราบจากการติดต่อ'); return; }
@@ -133,6 +141,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
     const replacing = (['facts', 'agreements', 'suggestions'] as const).some(key => form[key].trim() && form[key].trim() !== draft[key]);
     if (replacing && !window.confirm('ยืนยันนำร่างที่ตรวจแล้วไปแทนข้อความเดิมในฟอร์ม?')) return;
     dirty.current = true;
+    reviewedInputs.current = draftInputs(form);
     setForm(current => ({ ...current, ...draft }));
     setDraft(null);
   }
@@ -141,7 +150,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
     <div className="modal-backdrop contact-dialog-backdrop">
       <form ref={root} className="modal contact-dialog" role="dialog" aria-modal="true" aria-labelledby="contact-dialog-title" onSubmit={save}>
         <div className="modal-head">
-          <div><h2 id="contact-dialog-title">เพิ่มรายการประวัติการติดต่อ</h2><p className="small-note">ข้อความที่พนักงานบันทึก · ไม่ใช่ไฟล์เสียงหรือหลักฐานคำยินยอมของธนาคาร</p></div>
+          <div><h2 id="contact-dialog-title">เพิ่มรายการประวัติการติดต่อ</h2><p className="small-note">ฟอร์มเสนอของ CRM ไม่ใช่แบบฟอร์มทางการธนาคาร · ไม่ใช่ไฟล์เสียง ผลสินเชื่อ หรือหลักฐานคำยินยอม</p></div>
           <button className="button" type="button" disabled={saving} onClick={cancel} aria-label="ปิดฟอร์มประวัติการติดต่อ">ปิด</button>
         </div>
         <div className="contact-dialog-scroll">
@@ -164,7 +173,37 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
               <option value="">— เลือกผลการติดต่อ —</option>{options('ผลการติดต่อ').map(value => <option key={value}>{value}</option>)}
             </select></label>
             {!!form.outcome && <label><span>{form.outcome === 'ติดต่อไม่ได้' ? 'ผู้ที่พยายามติดต่อ (ถ้าทราบ)' : 'ผู้ที่ติดต่อด้วย (ถ้าทราบ)'}</span><input value={form.person} maxLength={20000} onChange={event => set('person', event.target.value)} /></label>}
-            {form.outcome === 'ขอไม่ให้ติดต่ออีก' && <div className="contact-warning" role="alert">ลูกค้าขอไม่ให้ติดต่ออีก ให้ส่งต่อคำขอตามกระบวนการธนาคาร การบันทึกนี้ยังไม่ได้บล็อกเบอร์หรือแก้ทะเบียนลูกค้า</div>}
+            {form.outcome === 'ขอไม่ให้ติดต่ออีก' && <div className="contact-warning" role="alert">ลูกค้าขอไม่ให้ติดต่ออีก ห้ามสร้างงานขายติดตาม ให้ตรวจช่องทาง/บทบาทและส่งต่อตาม Selling Guideline ผ่าน TM ตามกระบวนการที่เกี่ยวข้อง หากไม่แน่ใจให้ยืนยันขั้นตอนกับ TM ก่อน การบันทึกนี้ยังไม่ได้บล็อกเบอร์หรือแก้ทะเบียนลูกค้า</div>}
+            {(full || callback) && <label><span>แผนใช้เงินตามที่ลูกค้าแจ้ง (ถ้าทราบ)</span>
+              <select value={form.fundingPlan} onChange={event => set('fundingPlan', event.target.value)}>
+                <option value="">— ยังไม่ระบุ —</option>{FUNDING_PLANS.map(value => <option key={value}>{value}</option>)}
+              </select>
+            </label>}
+            {full && <>
+              <label className="contact-check"><input type="checkbox" checked={form.questionsAsked} onChange={event => set('questionsAsked', event.target.checked)} /><span>ได้สอบถามข้อมูลธุรกิจแล้ว — เปิดคำถาม 5 ข้อ (ไม่บังคับ)</span></label>
+              {form.questionsAsked && <section aria-label="คำตอบธุรกิจ 5 ข้อ" className="contact-question-group">
+                <p className="small-note">กรอกเฉพาะที่ลูกค้าแจ้ง ระบุหน่วยและแหล่งที่มาเมื่อมี ช่องว่างไม่ถือว่าไม่มีสินเชื่อหรือไม่มีรายได้</p>
+                {BUSINESS_QUESTIONS.map(([key, label]) => <label key={key}><span>{label}</span>
+                  <input value={form.answers[key]} maxLength={2000} onChange={event => set('answers', { ...form.answers, [key]: event.target.value })} />
+                </label>)}
+              </section>}
+              <details><summary>เกณฑ์คุณภาพ 8 ข้อ — ความเห็นพนักงาน (ไม่บังคับ)</summary>
+                <p className="small-note">ไม่ใช่เกณฑ์อนุมัติธนาคาร ไม่มีการคำนวณหรือตัดสินอัตโนมัติ และไม่บล็อกการบันทึก</p>
+                <p className="contact-warning">อายุธุรกิจในคู่มือขัดกัน: เกณฑ์ระบุ 8 ปีขึ้นไป แต่ข้อความจำระบุ 6 ปีขึ้นไป ให้บันทึกสิ่งที่ตรวจพบ แอปไม่เลือกเกณฑ์แทน</p>
+                {QUALITY_CRITERIA.map(([key, label]) => <label key={key}><span>{label}</span>
+                  <select value={form.quality[key]} onChange={event => set('quality', { ...form.quality, [key]: event.target.value })}>
+                    {QUALITY_RESULTS.map(value => <option key={value}>{value}</option>)}
+                  </select>
+                </label>)}
+                <label><span>สิ่งที่ตรวจพบ / แหล่งที่มาเกี่ยวกับเกณฑ์</span><textarea value={form.qualityNote} maxLength={2000} onChange={event => set('qualityNote', event.target.value)} /></label>
+              </details>
+              <details><summary>ขั้นเอกสารที่ยืนยันแล้ว (ไม่บังคับ)</summary>
+                <label><span>ขั้นเอกสาร</span><select value={form.documentStage} onChange={event => set('documentStage', event.target.value)}>
+                  <option value="">— ยังไม่ระบุ —</option>{DOCUMENT_STAGES.map(value => <option key={value}>{value}</option>)}
+                </select></label>
+                <p className="small-note">คำแนะนำจากคู่มือ Team.Su: Prescreen ใช้เอกสารกรรมการและเอกสารกิจการ; ขั้นถัดไปอาจนัดถ่ายรูปและสัมภาษณ์ หรือขอ Full Doc ตามที่ยืนยัน ไม่มีการอัปโหลด แก้แท็บเอกสาร หรือเปลี่ยนสถานะเคสจากตัวเลือกนี้</p>
+              </details>
+            </>}
             {!!form.outcome && <label><span>{full ? 'ข้อเท็จจริง *' : form.outcome === 'ไม่สนใจครั้งนี้' ? 'เหตุผล / หมายเหตุสั้น (ถ้ามี)' : 'หมายเหตุสั้น (ถ้ามี)'}</span>
               <textarea required={full} value={form.facts} maxLength={20000} onChange={event => set('facts', event.target.value)} placeholder="บันทึกเฉพาะสิ่งที่ทราบ ไม่จำเป็นต้องกรอกข้อความตัวอย่าง" />
               <small>บันทึกเฉพาะสิ่งที่ทราบ และระบุแหล่งที่มา</small>
@@ -184,8 +223,8 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
             </>}
             {draft && <section className="contact-draft" aria-label="ร่างสำหรับตรวจทาน">
               <h3>ร่างสำหรับตรวจทาน</h3>
-              <h4>ข้อเท็จจริง</h4><p>{draft.facts || 'ยังไม่มีข้อความ'}</p>
-              {(full || callback) && <><h4>ข้อตกลงที่ยืนยันแล้ว</h4><p>{draft.agreements || 'ยังไม่มีข้อความ'}</p><h4>ข้อเสนอแนะ / รอตรวจ</h4><p>{draft.suggestions || 'ยังไม่มีข้อความ'}</p></>}
+              <label><span>ร่างข้อเท็จจริง — แก้ไขก่อนใช้</span><textarea maxLength={20000} value={draft.facts} onChange={event => setDraft({ ...draft, facts: event.target.value })} /></label>
+              {(full || callback) && <><label><span>ร่างข้อตกลงที่ยืนยันแล้ว</span><textarea maxLength={20000} value={draft.agreements} onChange={event => setDraft({ ...draft, agreements: event.target.value })} /></label><label><span>ร่างข้อเสนอแนะ / รอตรวจ</span><textarea maxLength={20000} value={draft.suggestions} onChange={event => setDraft({ ...draft, suggestions: event.target.value })} /></label></>}
               <button className="button" type="button" onClick={applyDraft}>นำร่างที่ตรวจแล้วไปใช้ในฟอร์ม</button>
               <button className="button" type="button" onClick={() => setDraft(null)}>ปิดร่าง</button>
             </section>}
@@ -199,7 +238,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
               <label><span>วันเวลาตรวจ Call Verify (เวลาไทย)</span><input type="datetime-local" value={form.verifiedAt} onInput={event => set('verifiedAt', event.currentTarget.value)} onChange={event => set('verifiedAt', event.target.value)} /></label>
               <label><span>อ้างอิงหลักฐานสิทธิติดต่อ</span><input value={form.evidence} maxLength={20000} onChange={event => set('evidence', event.target.value)} /></label>
             </details>
-            {form.verify === 'สีแดง' && <p className="contact-warning" role="alert">ผลสีแดง: ห้ามติดต่อ แต่ยังบันทึกเหตุการณ์ที่เกิดขึ้นแล้วได้</p>}
+            {form.verify === 'สีแดง' && <p className="contact-warning" role="alert">ผลสีแดง: ห้ามติดต่อหรือสร้างงานขายติดตาม แต่ยังบันทึกเหตุการณ์ที่เกิดขึ้นแล้วได้ ไม่ใช่สิทธิให้ติดต่อครั้งต่อไป</p>}
             {['สีเหลือง', 'สีเขียว'].includes(form.verify) && <p className="small-note">ต้องมีความยินยอมและหลักฐานก่อนติดต่อ ผลสีนี้เพียงอย่างเดียวไม่ยืนยันสิทธิติดต่อ</p>}
             <details><summary>ตัวอย่างวิธีบันทึก — ข้อมูลสังเคราะห์</summary><p className="small-note">ตัวอย่างเท่านั้น ใช้ได้เมื่อผู้ใช้ระบุข้อเท็จจริงนั้นจริง และไม่ถูกนำไปบันทึกเอง</p><p>ข้อเท็จจริง: ผู้ดูแลบริษัท ทดสอบ เอสเอ็มอี จำกัด แจ้งว่าสนใจข้อมูลสินเชื่อเพื่อหมุนเวียนธุรกิจ ยังไม่ได้ระบุวงเงิน</p><p>ข้อตกลง: ลูกค้าขอรับรายละเอียดผลิตภัณฑ์ทางช่องทางที่ระบุ</p><p>ข้อเสนอแนะ / รอตรวจ: สอบถามวัตถุประสงค์เพิ่มเติม และตรวจความพร้อมของเอกสาร</p></details>
           </fieldset>
@@ -213,3 +252,4 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
     </div>
   );
 }
+

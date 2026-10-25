@@ -38,7 +38,7 @@ describe('contact log mapping and local drafting', () => {
     draft = draftContact({ ...form, callbackAllowed: true });
     assert.match(draft.agreements, /พนักงานระบุว่าลูกค้าอนุญาต/);
     assert.deepEqual(draftContact({ ...form, callbackAllowed: true, ...draft }), draft);
-    assert.equal(draftContact({ ...example(), facts: '' }).facts, 'ผลการติดต่อ: สนใจ');
+    assert.equal(draftContact({ ...example(), facts: '' }).facts, '');
     assert.doesNotMatch(draft.facts, /บริษัท ทดสอบ เอสเอ็มอี/);
   });
   it('rejects malformed timestamps, options and raw JSON without confusing blanks with consent', () => {
@@ -67,3 +67,4 @@ describe('contact log mapping and local drafting', () => {
     assert.match(changed.agreements, /2026-10-27 11:00/);
   });
 });
+

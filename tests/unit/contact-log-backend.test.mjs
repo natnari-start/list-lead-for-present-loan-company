@@ -95,6 +95,24 @@ describe('protected idempotent contact creation', () => {
     assert.equal((await invoke(changed)).statusCode, 409);
     assert.equal(writes.length, 1);
   });
+  it('round-trips structured JSON, preserves legacy JSON and other tabs, and replays without another append', async () => {
+    const form = { ...emptyContactForm(), customerId: 'SYN-TEST-CUST-001', caseId: 'SYN-TEST-CASE-001', contactedAt: '2026-10-25T09:15', channel: 'โทรศัพท์', outcome: 'สนใจ', facts: 'ร่างที่พนักงานตรวจแล้ว', fundingPlan: 'มีแผน', questionsAsked: true, documentStage: 'ขอ Prescreen' };
+    form.answers.businessType = 'บริการทดสอบ';
+    form.quality.businessAge = 'ไม่ผ่านตามที่พนักงานเห็น';
+    const body = { part: 'contacts', requestId: randomUUID(), values: contactValues(form) };
+    const result = await invoke(body);
+    assert.equal(result.statusCode, 200);
+    const saved = JSON.parse(result.body).record;
+    const details = JSON.parse(saved.values[indexes.businessJson]).crmContactV1;
+    assert.equal(details.answers.businessType, 'บริการทดสอบ');
+    assert.equal(details.quality.businessAge, 'ไม่ผ่านตามที่พนักงานเห็น');
+    assert.equal(details.documentStage, 'ขอ Prescreen');
+    assert.equal(saved.values[indexes.facts], form.facts);
+    assert.equal((await invoke(body)).statusCode, 200);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(data.contacts[0], initial.contacts[0]);
+    for (const part of ['customers', 'cases', 'tasks', 'documents']) assert.deepEqual(data[part], initial[part]);
+  });
   it('handles concurrent duplicate requests and a response lost after commit without a second append', async () => {
     const body = payload();
     const pair = await Promise.all([invoke(body), invoke(body)]);
@@ -132,3 +150,4 @@ describe('protected idempotent contact creation', () => {
     assert.deepEqual(data.contacts[0], initial.contacts[0]);
   });
 });
+
