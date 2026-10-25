@@ -39,6 +39,7 @@ globalThis.fetch = async (input, options = {}) => {
     assert.equal(body.requests.length, 2);
     const receipt = body.requests[0].addNamedRange.namedRange;
     const append = body.requests[1].appendCells;
+    assert.equal(append.sheetId, 3, 'native table append still requires its sheet/grid ID');
     assert.equal(append.tableId, 'synthetic_contacts_table');
     assert.match(receipt.namedRangeId, /^crm_contact_[a-f0-9]{64}$/);
     if (mode === 'deny') return response({}, 403);

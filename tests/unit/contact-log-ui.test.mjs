@@ -38,7 +38,9 @@ it('opens outcome-specific fields, reviews local drafts, keeps failed input and 
     document.getElementById('opener').focus();
     await act(async () => root.render(createElement(Dialog, { customers, cases, context: {}, disabled: false, onClose: () => closed++, onSaved: row => saved.push(row) })));
     assert.equal(document.activeElement, field('บริษัท / รหัสลูกค้า *'));
+    await set('วันเวลาที่ติดต่อจริง (เวลาไทย) *', '2026-10-25T09:15');
     await set('บริษัท / รหัสลูกค้า *', 'SYN-TEST-CUST-001');
+    assert.equal(field('วันเวลาที่ติดต่อจริง (เวลาไทย) *').value, '2026-10-25T09:15');
     assert.ok(!field('รหัสเคส (ถ้ามี)').textContent.includes('SYN-TEST-CASE-002'));
     await set('รหัสเคส (ถ้ามี)', 'SYN-TEST-CASE-001');
     await set('บริษัท / รหัสลูกค้า *', 'SYN-TEST-CUST-002');
@@ -55,6 +57,7 @@ it('opens outcome-specific fields, reviews local drafts, keeps failed input and 
     await set('ผลการติดต่อ *', 'ขอคุยใหม่');
     await set('วันเวลาติดต่อกลับ (เวลาไทย ถ้าทราบ)', '2026-10-26T10:00');
     await click(button('ช่วยร่างบันทึก'));
+    assert.equal(field('วันเวลาติดต่อกลับ (เวลาไทย ถ้าทราบ)').value, '2026-10-26T10:00');
     assert.equal(calls.length, 0);
     const preview = document.querySelector('[aria-label="ร่างสำหรับตรวจทาน"]');
     assert.match(preview.textContent, /รอยืนยันจากลูกค้า/);
@@ -77,6 +80,7 @@ it('opens outcome-specific fields, reviews local drafts, keeps failed input and 
     assert.equal(calls.length, 2);
     assert.deepEqual(calls[0].body, calls[1].body);
     const indexes = contactIndexes();
+    assert.equal(calls[1].body.values[indexes.contactedAt], '2026-10-25T09:15');
     assert.equal(calls[1].body.values[indexes.agreements], null);
     assert.equal(calls[1].body.values[indexes.salesSheet], null);
     assert.equal(calls[1].body.values[indexes.suggestions], null);

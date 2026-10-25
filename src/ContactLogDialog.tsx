@@ -156,7 +156,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
             <label><span>รหัสเคส (ถ้ามี)</span><select value={form.caseId} disabled={!form.customerId || frozen} onChange={event => set('caseId', event.target.value)}>
               <option value="">— ไม่ระบุเคส —</option>{matchingCases.map(row => <option key={row.id} value={row.id}>{row.id}</option>)}
             </select></label>
-            <label><span>วันเวลาที่ติดต่อจริง (เวลาไทย) *</span><input required type="datetime-local" value={form.contactedAt} onChange={event => set('contactedAt', event.target.value)} /></label>
+            <label><span>วันเวลาที่ติดต่อจริง (เวลาไทย) *</span><input required type="datetime-local" value={form.contactedAt} onInput={event => set('contactedAt', event.currentTarget.value)} onChange={event => set('contactedAt', event.target.value)} /></label>
             <label><span>ช่องทาง *</span><select required value={form.channel} onChange={event => set('channel', event.target.value)}>
               <option value="">— เลือกช่องทาง —</option>{options('ช่องทาง').map(value => <option key={value}>{value}</option>)}
             </select></label>
@@ -170,7 +170,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
               <small>บันทึกเฉพาะสิ่งที่ทราบ และระบุแหล่งที่มา</small>
             </label>}
             {callback && <>
-              <label><span>วันเวลาติดต่อกลับ (เวลาไทย ถ้าทราบ)</span><input type="datetime-local" value={form.callbackAt} onChange={event => set('callbackAt', event.target.value)} /></label>
+              <label><span>วันเวลาติดต่อกลับ (เวลาไทย ถ้าทราบ)</span><input type="datetime-local" value={form.callbackAt} onInput={event => set('callbackAt', event.currentTarget.value)} onChange={event => set('callbackAt', event.target.value)} /></label>
               <label><span>ช่องทางติดต่อกลับที่ลูกค้าระบุ (ถ้ามี)</span><input value={form.callbackChannel} maxLength={20000} onChange={event => set('callbackChannel', event.target.value)} /></label>
             </>}
             {(full || callback) && <>
@@ -196,7 +196,7 @@ export default function ContactLogDialog({ customers, cases, context, disabled, 
             <details className="contact-before"><summary>ก่อนติดต่อ — ผล Call Verify และอ้างอิงหลักฐาน</summary>
               <p className="small-note">เจ้าหน้าที่เป็นผู้บันทึกผล ไม่ใช่การตรวจ Call Verify อัตโนมัติ</p>
               <label><span>ผล Call Verify ก่อนติดต่อ</span><select value={form.verify} onChange={event => set('verify', event.target.value)}>{options('ผล Call Verify ก่อนติดต่อ').map(value => <option key={value}>{value}</option>)}</select></label>
-              <label><span>วันเวลาตรวจ Call Verify (เวลาไทย)</span><input type="datetime-local" value={form.verifiedAt} onChange={event => set('verifiedAt', event.target.value)} /></label>
+              <label><span>วันเวลาตรวจ Call Verify (เวลาไทย)</span><input type="datetime-local" value={form.verifiedAt} onInput={event => set('verifiedAt', event.currentTarget.value)} onChange={event => set('verifiedAt', event.target.value)} /></label>
               <label><span>อ้างอิงหลักฐานสิทธิติดต่อ</span><input value={form.evidence} maxLength={20000} onChange={event => set('evidence', event.target.value)} /></label>
             </details>
             {form.verify === 'สีแดง' && <p className="contact-warning" role="alert">ผลสีแดง: ห้ามติดต่อ แต่ยังบันทึกเหตุการณ์ที่เกิดขึ้นแล้วได้</p>}

@@ -482,7 +482,8 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
       range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
     } } },
     { appendCells: {
-      ...(table?.tableId ? { tableId: table.tableId } : { sheetId }),
+      sheetId,
+      ...(table?.tableId ? { tableId: table.tableId } : {}),
       rows: [{ values: cells }],
       fields: table ? 'userEnteredValue,userEnteredFormat(textFormat,verticalAlignment,wrapStrategy)' : 'userEnteredValue,userEnteredFormat,dataValidation',
     } },

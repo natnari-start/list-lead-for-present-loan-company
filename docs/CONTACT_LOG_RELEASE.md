@@ -62,7 +62,11 @@ Inspect the live contact headers, native table range and all column properties.
 The planner adds no grid columns, writes no record values, and returns an empty
 request list on already-compatible metadata. It refuses unexpected structures.
 The create route uses the native table's append capability, preserving its typed
-dropdown/date controls and automatically extending the table. For a plain sheet,
+dropdown/date controls and automatically extending the table. Send both its
+`sheetId` and `tableId`: the tested endpoint requires the concrete grid ID even
+when the table ID is supplied. Datetime inputs listen to both input and change
+events so a typed/picked time remains in controlled form state after focus moves.
+For a plain sheet,
 it appends complete cells with safe exemplar styles and validation; row-specific
 links, rich chips and values are never copied.
 
