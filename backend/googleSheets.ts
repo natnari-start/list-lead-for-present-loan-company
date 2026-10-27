@@ -439,16 +439,21 @@ export class GoogleSheetsConflictError extends Error {
 
 // The receipt and the append share one atomic Sheets batch. A repeated receipt ID
 // makes the whole batch fail, including when requests reach different workers.
-export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
-  const spec = specs.find(item => item.key === 'contacts');
-  if (!spec || !/^[a-f0-9]{64}$/.test(receiptHash)) throw new Error('คำขอสร้างประวัติไม่ถูกต้อง');
-  const indexes = contactIndexes(spec.headers);
-  const id = String(values[indexes.id]);
-  const receiptId = 'crm_contact_' + receiptHash;
+async function createGoogleSheetsRecord(
+  specs: SheetSpec[],
+  part: 'contacts' | 'customers',
+  receiptHash: string,
+  values: unknown[]
+) {
+  const spec = specs.find(item => item.key === part);
+  if (!spec || !/^[a-f0-9]{64}$/.test(receiptHash)) throw new Error('คำขอสร้างรายการไม่ถูกต้อง');
+  const id = String(values[0]);
+  const label = part === 'contacts' ? 'ประวัติการติดต่อ' : 'ทะเบียนลูกค้า';
+  const receiptId = 'crm_' + (part === 'contacts' ? 'contact_' : 'customer_') + receiptHash;
   const expected = values.map((value, index) => normalizeValue(value, index, spec, 'th_TH'));
   const findSaved = async () => {
-    const rows = (await loadGoogleSheetsData([spec])).contacts.filter(row => row.id === id);
-    if (rows.length > 1) throw new GoogleSheetsConflictError('พบรหัสประวัติซ้ำ กรุณาตรวจสอบก่อนสร้างรายการใหม่');
+    const rows = ((await loadGoogleSheetsData([spec]))[part] || []).filter(row => row.id === id);
+    if (rows.length > 1) throw new GoogleSheetsConflictError('พบรหัสรายการซ้ำใน' + label + ' กรุณาตรวจสอบก่อนสร้างรายการใหม่');
     const saved = rows[0];
     if (saved && JSON.stringify(saved.values) !== JSON.stringify(expected)) {
       throw new GoogleSheetsConflictError('คำขอเดิมมีข้อมูลบันทึกแล้ว แต่เนื้อหาไม่ตรงกับร่างนี้ กรุณารีเฟรชเพื่อตรวจรายการเดิม');
@@ -461,18 +466,19 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
   const sheet = metadata.sheets?.find(item => item.properties?.title === spec.sheetName);
   const sheetId = sheet?.properties?.sheetId;
   if (sheetId === undefined || !headersMatch(await readHeader(spec), spec.headers)) {
-    throw new GoogleSheetsConflictError('หัวตารางประวัติการติดต่อไม่ตรง กรุณาตรวจโครงสร้างชีตก่อนบันทึก');
+    throw new GoogleSheetsConflictError('หัวตาราง' + label + 'ไม่ตรง กรุณาตรวจโครงสร้างชีตก่อนบันทึก');
   }
   if (metadata.namedRanges?.some(item => item.namedRangeId === receiptId)) {
-    throw new GoogleSheetsConflictError('คำขอนี้เคยถูกบันทึกแล้ว แต่ไม่พบแถวเดิม กรุณาตรวจประวัติก่อนสร้างรายการใหม่');
+    throw new GoogleSheetsConflictError('คำขอนี้เคยถูกบันทึกแล้ว แต่ไม่พบแถวเดิม กรุณาตรวจ' + label + 'ก่อนสร้างรายการใหม่');
   }
   const table = sheet?.tables?.find(item => (item.range?.startColumnIndex || 0) === 0);
   if (table && table.range?.endColumnIndex !== spec.headers.length) {
-    throw new GoogleSheetsConflictError('ตารางประวัติการติดต่อยังไม่ครอบคลุมทุกคอลัมน์ กรุณาดำเนินการ migration ก่อน');
+    throw new GoogleSheetsConflictError('ตาราง' + label + 'ยังไม่ครอบคลุมทุกคอลัมน์ กรุณาดำเนินการ migration ก่อน');
   }
-  if (table && (spec.dates || []).some(index =>
-    table.columnProperties?.find(column => (column.columnIndex || 0) === index)?.columnType !== 'DATE_TIME'
-  )) throw new GoogleSheetsConflictError('คอลัมน์วันเวลาต้องเป็น DATE_TIME กรุณาดำเนินการ migration ก่อน');
+  if (table && (spec.dates || []).some(index => {
+    const type = String(table.columnProperties?.find(column => (column.columnIndex || 0) === index)?.columnType || '');
+    return part === 'contacts' ? type !== 'DATE_TIME' : !['DATE', 'DATE_TIME'].includes(type);
+  })) throw new GoogleSheetsConflictError('คอลัมน์วันที่ของ' + label + 'ยังไม่พร้อม กรุณาดำเนินการ migration ก่อน');
 
   const quoted = "'" + spec.sheetName.replace(/'/g, "''") + "'";
   const spreadsheetId = await getSpreadsheetId();
@@ -493,7 +499,10 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
       textFormat,
     };
     if (!table) userEnteredFormat.numberFormat = spec.dates?.includes(index)
-      ? { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' } : { type: 'TEXT' };
+      ? (part === 'contacts'
+        ? { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' }
+        : { type: 'DATE', pattern: 'yyyy-mm-dd' })
+      : { type: 'TEXT' };
     return {
       userEnteredValue: typeof input === 'number' ? { numberValue: input } : { stringValue: String(input) },
       userEnteredFormat,
@@ -502,7 +511,7 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
   });
   const requests = [
     { addNamedRange: { namedRange: {
-      namedRangeId: receiptId, name: 'CRM_CONTACT_' + receiptHash,
+      namedRangeId: receiptId, name: 'CRM_' + (part === 'contacts' ? 'CONTACT_' : 'CUSTOMER_') + receiptHash,
       range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
     } } },
     { appendCells: {
@@ -518,7 +527,7 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
       method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ requests }),
     });
-    if (!response.ok) throw new GoogleSheetsFailure(classifyGoogleFailure(response.status), response.status, 'contact_append_failed', 'write_api');
+    if (!response.ok) throw new GoogleSheetsFailure(classifyGoogleFailure(response.status), response.status, part + '_append_failed', 'write_api');
   } catch (cause) {
     // A response can be lost after commit. Read back this same stable ID; never
     // retry with a fresh ID or write to an existing row as a recovery action.
@@ -527,6 +536,14 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
     throw cause;
   }
   return { record: { id, values: expected }, created: true, replayed: false };
+}
+
+export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+  return createGoogleSheetsRecord(specs, 'contacts', receiptHash, values);
+}
+
+export async function createGoogleSheetsCustomer(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+  return createGoogleSheetsRecord(specs, 'customers', receiptHash, values);
 }
 
 function canonicalValue(value: unknown): unknown {
