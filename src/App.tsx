@@ -32,6 +32,7 @@ const names: Record<Part, string> = {
   tasks: 'งานติดตาม',
   documents: 'รายการเอกสาร',
 };
+const tabOrder: Part[] = ['customers', 'contacts', 'tasks', 'cases', 'documents'];
 const columns: Record<Part, number[]> = {
   customers: [0, 2, 5, 7, 14, 19],
   cases: [0, 1, 3, 5, 7, 12, 13],
@@ -576,16 +577,16 @@ export default function App() {
           <small>จำนวนเคสแยกจากจำนวนลูกค้า · นับลูกค้าจากรหัสไม่ซ้ำ</small>
         </section>
         <nav className="tabs">
-          {specs.map(item => (
+          {tabOrder.map(key => (
             <button
-              className={part === item.key ? 'selected' : ''}
-              key={item.key}
+              className={part === key ? 'selected' : ''}
+              key={key}
               onClick={() => {
-                setPart(item.key);
+                setPart(key);
                 setQuery('');
               }}
             >
-              {names[item.key]} <span>{data[item.key]?.length || 0}</span>
+              {names[key]} <span>{data[key]?.length || 0}</span>
             </button>
           ))}
         </nav>
