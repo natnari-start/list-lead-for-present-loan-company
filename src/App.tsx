@@ -3,6 +3,7 @@ import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
+import CustomerImportDialog from './CustomerImportDialog';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
@@ -32,6 +33,7 @@ const names: Record<Part, string> = {
   tasks: 'งานติดตาม',
   documents: 'รายการเอกสาร',
 };
+const tabOrder: Part[] = ['customers', 'contacts', 'tasks', 'cases', 'documents'];
 const columns: Record<Part, number[]> = {
   customers: [0, 2, 5, 7, 14, 19],
   cases: [0, 1, 3, 5, 7, 12, 13],
@@ -77,6 +79,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [record, setRecord] = useState<Row | null>(null);
   const [contactContext, setContactContext] = useState<{ customerId?: string; caseId?: string } | null>(null);
+  const [customerImportOpen, setCustomerImportOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
@@ -576,16 +579,19 @@ export default function App() {
           <small>จำนวนเคสแยกจากจำนวนลูกค้า · นับลูกค้าจากรหัสไม่ซ้ำ</small>
         </section>
         <nav className="tabs">
-          {specs.map(item => (
+          {tabOrder.map(key => (
             <button
-              className={part === item.key ? 'selected' : ''}
-              key={item.key}
+              className={part === key ? 'selected' : ''}
+              key={key}
               onClick={() => {
-                setPart(item.key);
+                setPart(key);
                 setQuery('');
+                setRecord(null);
+                setContactContext(null);
+                setCustomerImportOpen(false);
               }}
             >
-              {names[item.key]} <span>{data[item.key]?.length || 0}</span>
+              {names[key]} <span>{data[key]?.length || 0}</span>
             </button>
           ))}
         </nav>
@@ -605,7 +611,9 @@ export default function App() {
             >
               รีเฟรช
             </button>
-            {part === 'contacts' ? (
+            {part === 'customers' ? (
+              <button className="button primary" type="button" onClick={() => setCustomerImportOpen(true)} disabled={loading || sheetStatus !== 'connected'}>เพิ่มรายชื่อ</button>
+            ) : part === 'contacts' ? (
               <button className="button primary" data-add-contact type="button" onClick={() => beginContact()} disabled={loading || sheetStatus !== 'connected'}>เพิ่มรายการ</button>
             ) : <small className="small-note">เพิ่มประวัติการติดต่อได้จากแท็บประวัติการติดต่อ</small>}
           </div>
@@ -622,6 +630,22 @@ export default function App() {
         {notice && (
           <div className="success-banner" role="status">{notice}<button onClick={() => setNotice('')}>ปิด</button></div>
         )}
+        {customerImportOpen && part === 'customers' && <CustomerImportDialog
+          headers={customerSpec.headers}
+          existingRows={data.customers}
+          disabled={loading || sheetStatus !== 'connected'}
+          onClose={() => setCustomerImportOpen(false)}
+          onSaved={(saved, replayed, complete) => {
+            setData(current => ({
+              ...current,
+              customers: [...current.customers.filter(row => !saved.some(item => item.id === row.id)), ...saved],
+            }));
+            if (complete) setCustomerImportOpen(false);
+            setNotice(complete
+              ? `บันทึก ${saved.length} รายชื่อแล้ว${replayed ? ` · ยืนยันคำขอเดิม ${replayed} รายการโดยไม่สร้างซ้ำ` : ''}`
+              : `บันทึกสำเร็จ ${saved.length} รายชื่อ ส่วนที่เหลือยังอยู่ในหน้าตรวจสอบ`);
+          }}
+        />}
         {contactContext && <ContactLogDialog
           customers={data.customers} cases={data.cases} context={contactContext}
           disabled={loading || sheetStatus !== 'connected'}

@@ -10,7 +10,7 @@ import { schemas } from '../src/schema';
 import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-search-status';
 import { contactIndexes, validateContactValues } from '../src/contact-log';
 import { createHash } from 'node:crypto';
-import { createGoogleSheetsContact, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
+import { createGoogleSheetsContact, createGoogleSheetsCustomer, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
   key: string;
@@ -48,6 +48,46 @@ const adminAllowlist: RouterMiddleware = async (ctx) => {
   if (!isAllowed) return error('บัญชีนี้ไม่ได้รับอนุญาต', 403);
 };
 const auth: RouterMiddleware[] = [requireAuth(), adminAllowlist];
+const bangkokDate = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date());
+const validDate = (value: unknown) => {
+  const text = String(value ?? '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) && new Date(text + 'T00:00:00Z').toISOString().slice(0, 10) === text;
+};
+function validateCustomerCreate(spec: SheetSpec, values: unknown[]): string | null {
+  if (values.length !== spec.headers.length) return 'จำนวนช่องทะเบียนลูกค้าไม่ตรงกับ schema';
+  if (values.some(value => typeof value === 'string' && value.length > 20000)) return 'ข้อมูลบางช่องยาวเกินขีดจำกัด';
+  for (const index of spec.required || []) {
+    if (values[index] === null || values[index] === undefined || String(values[index]).trim() === '') {
+      return 'กรุณากรอก ' + spec.headers[index];
+    }
+  }
+  for (const [rawIndex, choices] of Object.entries(spec.options || {})) {
+    const index = Number(rawIndex), value = values[index];
+    if (value !== null && value !== undefined && String(value).trim() && !choices.includes(String(value))) {
+      return 'ค่า ' + spec.headers[index] + ' ไม่อยู่ในตัวเลือกที่รองรับ';
+    }
+  }
+  for (const index of spec.numbers || []) {
+    const value = values[index];
+    if (value !== null && value !== undefined && String(value).trim() && !Number.isFinite(Number(value))) {
+      return spec.headers[index] + ' ต้องเป็นตัวเลข';
+    }
+  }
+  for (const index of spec.dates || []) {
+    const value = values[index];
+    if (value !== null && value !== undefined && String(value).trim() && !validDate(value)) {
+      return spec.headers[index] + ' ต้องเป็นวันที่รูปแบบ YYYY-MM-DD';
+    }
+  }
+  const contactSearchIndex = spec.headers.indexOf(CONTACT_SEARCH_HEADER);
+  if (contactSearchIndex >= 0 && values[contactSearchIndex] !== null && values[contactSearchIndex] !== undefined &&
+    String(values[contactSearchIndex]).trim() && !isContactSearchValue(values[contactSearchIndex])) {
+    return 'ค่าผลค้นหา Google ต้องเป็น TRUE หรือ FALSE';
+  }
+  return null;
+}
 
 export const handler = router({
   'GET /api/session': [...auth, async () => json({ authorized: true })],
@@ -92,17 +132,42 @@ export const handler = router({
     ...auth,
     async ({ body, user }) => {
       const payload = body as { part?: unknown; requestId?: unknown; values?: unknown } | null;
-      if (payload?.part !== 'contacts') return error('รุ่นนี้เพิ่มได้เฉพาะประวัติการติดต่อ', 405);
-      const spec = SPECS.find(item => item.key === 'contacts')!;
+      if (payload?.part !== 'contacts' && payload?.part !== 'customers') return error('รุ่นนี้เพิ่มได้เฉพาะทะเบียนลูกค้าและประวัติการติดต่อ', 405);
+      const spec = SPECS.find(item => item.key === payload.part)!;
       if (typeof payload.requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(payload.requestId) || !Array.isArray(payload.values)) {
-        return error('รูปแบบคำขอสร้างประวัติไม่ถูกต้อง', 400);
+        return error('รูปแบบคำขอสร้างรายการไม่ถูกต้อง', 400);
       }
       const values = [...payload.values];
+      const hash = createHash('sha256').update(user!.userId + ':' + payload.requestId).digest('hex');
+      if (payload.part === 'customers') {
+        if (values[0] !== null) return error('รหัสลูกค้าต้องสร้างโดย backend', 400);
+        const today = bangkokDate();
+        values[0] = 'CUSTOMER-' + hash.slice(0, 32).toUpperCase();
+        values[1] = today;
+        values[19] = 'ใช้งาน';
+        values[22] = today;
+        for (const index of spec.numbers || []) {
+          if (values[index] !== null && values[index] !== undefined && String(values[index]).trim()) values[index] = Number(values[index]);
+        }
+        const invalidCustomer = validateCustomerCreate(spec, values);
+        if (invalidCustomer) return error(invalidCustomer, 400);
+        try {
+          const current = await loadGoogleSheetsData(SPECS);
+          const registration = String(values[24] ?? '').trim();
+          if (registration && current.customers.some(row => row.id !== values[0] && String(row.values[24] ?? '').trim() === registration)) {
+            return error('เลขทะเบียนนิติบุคคลนี้ซ้ำกับรายการอื่น กรุณาตรวจสอบก่อนบันทึก', 409);
+          }
+          return json(await createGoogleSheetsCustomer(SPECS, hash, values));
+        } catch (cause) {
+          if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
+          const failure = describeGoogleSheetsFailure(cause);
+          return error('ยังยืนยันการบันทึกลูกค้าไม่ได้ กรุณาตรวจสอบคำขอเดิมอีกครั้ง: ' + failure.message, failure.status === 403 ? 403 : 502);
+        }
+      }
       const invalid = validateContactValues(values, spec.headers);
       if (invalid) return error(invalid, 400);
       const indexes = contactIndexes(spec.headers);
       if (values[indexes.id] !== null) return error('รหัสบันทึกต้องสร้างโดย backend', 400);
-      const hash = createHash('sha256').update(user!.userId + ':' + payload.requestId).digest('hex');
       values[indexes.id] = 'CONTACT-' + hash.slice(0, 32).toUpperCase();
       try {
         // This is a shared CRM sheet, accessible only to the configured admins.
