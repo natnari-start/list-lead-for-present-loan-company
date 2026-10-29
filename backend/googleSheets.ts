@@ -10,6 +10,7 @@ type SheetSpec = {
   numbers?: number[];
   required?: number[];
   options?: Record<string, string[]>;
+  optional?: boolean;
 };
 
 type ServiceAccount = {
@@ -378,7 +379,7 @@ export async function inspectGoogleSheets(
   );
   const checkedSheets = await Promise.all(specs.map(async spec => {
     if (!availableNames.has(spec.sheetName)) {
-      return { name: spec.sheetName, headerCount: 0, headersMatch: false };
+      return { name: spec.sheetName, headerCount: 0, headersMatch: !!spec.optional };
     }
     const actual = await readHeader(spec);
     return {
@@ -403,6 +404,10 @@ export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetDat
   const data: SheetData = {};
   for (const spec of specs) {
     const sheet = sheets.get(spec.sheetName);
+    if (!sheet && spec.optional) {
+      data[spec.key] = [];
+      continue;
+    }
     if (!sheet) throw new Error('Required Google Sheet tab is missing');
     const header = await readHeader(spec);
     if (!headersMatch(header, spec.headers)) {
@@ -441,15 +446,16 @@ export class GoogleSheetsConflictError extends Error {
 // makes the whole batch fail, including when requests reach different workers.
 async function createGoogleSheetsRecord(
   specs: SheetSpec[],
-  part: 'contacts' | 'customers',
+  part: 'contacts' | 'customers' | 'financials',
   receiptHash: string,
   values: unknown[]
 ) {
   const spec = specs.find(item => item.key === part);
   if (!spec || !/^[a-f0-9]{64}$/.test(receiptHash)) throw new Error('คำขอสร้างรายการไม่ถูกต้อง');
   const id = String(values[0]);
-  const label = part === 'contacts' ? 'ประวัติการติดต่อ' : 'ทะเบียนลูกค้า';
-  const receiptId = 'crm_' + (part === 'contacts' ? 'contact_' : 'customer_') + receiptHash;
+  const label = part === 'contacts' ? 'ประวัติการติดต่อ' : part === 'customers' ? 'ทะเบียนลูกค้า' : 'งบการเงินรายปี';
+  const receiptPart = part === 'contacts' ? 'contact_' : part === 'customers' ? 'customer_' : 'financial_';
+  const receiptId = 'crm_' + receiptPart + receiptHash;
   const expected = values.map((value, index) => normalizeValue(value, index, spec, 'th_TH'));
   const findSaved = async () => {
     const rows = ((await loadGoogleSheetsData([spec]))[part] || []).filter(row => row.id === id);
@@ -502,7 +508,9 @@ async function createGoogleSheetsRecord(
       ? (part === 'contacts'
         ? { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' }
         : { type: 'DATE', pattern: 'yyyy-mm-dd' })
-      : { type: 'TEXT' };
+      : spec.numbers?.includes(index)
+        ? { type: 'NUMBER', pattern: '#,##0.00' }
+        : { type: 'TEXT' };
     return {
       userEnteredValue: typeof input === 'number' ? { numberValue: input } : { stringValue: String(input) },
       userEnteredFormat,
@@ -511,7 +519,7 @@ async function createGoogleSheetsRecord(
   });
   const requests = [
     { addNamedRange: { namedRange: {
-      namedRangeId: receiptId, name: 'CRM_' + (part === 'contacts' ? 'CONTACT_' : 'CUSTOMER_') + receiptHash,
+      namedRangeId: receiptId, name: 'CRM_' + (part === 'contacts' ? 'CONTACT_' : part === 'customers' ? 'CUSTOMER_' : 'FINANCIAL_') + receiptHash,
       range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
     } } },
     { appendCells: {
@@ -544,6 +552,10 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
 
 export async function createGoogleSheetsCustomer(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
   return createGoogleSheetsRecord(specs, 'customers', receiptHash, values);
+}
+
+export async function createGoogleSheetsFinancial(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+  return createGoogleSheetsRecord(specs, 'financials', receiptHash, values);
 }
 
 function canonicalValue(value: unknown): unknown {
@@ -686,4 +698,90 @@ export async function updateGoogleSheetsRecord(
     valueInputOption: 'RAW',
     data: updates,
   });
+}
+
+export async function deleteGoogleSheetsRecords(
+  specs: SheetSpec[],
+  targets: Array<{ key: string; ids: string[] }>
+): Promise<void> {
+  const requested = targets
+    .map(target => ({
+      key: target.key,
+      ids: [...new Set(target.ids.map(id => String(id).trim()).filter(Boolean))],
+    }))
+    .filter(target => target.ids.length > 0);
+  if (!requested.length) return;
+
+  const metadata = await getMetadata();
+  const requests: Array<{
+    deleteDimension: {
+      range: { sheetId: number; dimension: 'ROWS'; startIndex: number; endIndex: number };
+    };
+  }> = [];
+
+  for (const target of requested) {
+    const spec = specs.find(item => item.key === target.key);
+    if (!spec) throw new Error('ไม่พบประเภทข้อมูลที่ต้องการลบ');
+    const sheet = (metadata.sheets || []).find(item => item.properties?.title === spec.sheetName);
+    const sheetId = sheet?.properties?.sheetId;
+    if (!sheet || sheetId === undefined) throw new Error('ไม่พบแท็บ Google Sheets ที่ต้องการลบข้อมูล');
+    if (!headersMatch(await readHeader(spec), spec.headers)) {
+      throw new GoogleSheetsConflictError('หัวตารางถูกเปลี่ยน กรุณาตรวจโครงสร้างชีตก่อนลบ');
+    }
+
+    const rowCount = sheet.properties?.gridProperties?.rowCount || 1;
+    const sheetRange = "'" + spec.sheetName.replace(/'/g, "''") + "'";
+    const idValues = rowCount > 1
+      ? await googleGet<ValuesResponse>(await valuesUrl(sheetRange + '!A2:A' + rowCount))
+      : { values: [] };
+    const rowsById = new Map<string, number[]>();
+    for (const [index, row] of (idValues.values || []).entries()) {
+      const id = String(row[0] ?? '');
+      if (!id) continue;
+      rowsById.set(id, [...(rowsById.get(id) || []), index + 2]);
+    }
+
+    const rowNumbers = target.ids.map(id => {
+      const matches = rowsById.get(id) || [];
+      if (!matches.length) throw new GoogleSheetsConflictError('ไม่พบรายการที่ต้องการลบแล้ว กรุณารีเฟรช');
+      if (matches.length > 1) throw new GoogleSheetsConflictError('พบรหัสรายการซ้ำใน Google Sheets จึงหยุดการลบ');
+      return matches[0];
+    }).sort((a, b) => b - a);
+
+    for (const rowNumber of rowNumbers) {
+      requests.push({
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: rowNumber - 1,
+            endIndex: rowNumber,
+          },
+        },
+      });
+    }
+  }
+
+  const token = await createAccessToken();
+  let response: Response;
+  try {
+    response = await fetch(
+      'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(await getSpreadsheetId()) + ':batchUpdate',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests }),
+      }
+    );
+  } catch {
+    throw new GoogleSheetsFailure('upstream_error', undefined, 'network_error', 'write_api');
+  }
+  if (!response.ok) {
+    let reason = '';
+    try {
+      const body = await response.json() as { error?: { status?: string; errors?: Array<{ reason?: string }> } };
+      reason = body.error?.errors?.[0]?.reason || body.error?.status || '';
+    } catch {}
+    throw new GoogleSheetsFailure(classifyGoogleFailure(response.status, reason), response.status, reason, 'write_api');
+  }
 }

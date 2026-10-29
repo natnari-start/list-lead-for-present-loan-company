@@ -1,19 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
 import CustomerImportDialog from './CustomerImportDialog';
+import FinancialEditorDialog from './FinancialEditorDialog';
+import FinancialScreeningCell, { FinancialHistory, LatestFinancialCell, RegistryScreeningCell } from './FinancialScreeningCell';
+import { assessFinancials, type OverallStatus } from './financial-screening';
+import { filterCustomerRegistryRows } from './customer-registry';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
-  contactSearchUpdate,
   isContactSearchChecked,
 } from './contact-search-status';
 
 type Part = 'customers' | 'cases' | 'contacts' | 'tasks' | 'documents';
 type Row = { id: string; values: unknown[] };
-type Data = Record<Part, Row[]>;
+type Data = Record<Part, Row[]> & { financials?: Row[] };
 type Spec = {
   key: Part;
   sheetName: string;
@@ -35,7 +38,7 @@ const names: Record<Part, string> = {
 };
 const tabOrder: Part[] = ['customers', 'contacts', 'tasks', 'cases', 'documents'];
 const columns: Record<Part, number[]> = {
-  customers: [0, 2, 5, 7, 14, 19],
+  customers: [2, 14],
   cases: [0, 1, 3, 5, 7, 12, 13],
   contacts: [0, 1, 2, 3, 4, 6],
   tasks: [0, 1, 2, 3, 5, 7],
@@ -47,6 +50,7 @@ const blankData = (): Data => ({
   contacts: [],
   tasks: [],
   documents: [],
+  financials: [],
 });
 const isBlank = (value: unknown) =>
   value === null || value === undefined || String(value).trim() === '';
@@ -77,29 +81,46 @@ export default function App() {
   const [part, setPart] = useState<Part>('customers');
   const [data, setData] = useState<Data>(blankData());
   const [query, setQuery] = useState('');
+  const [financialFilter, setFinancialFilter] = useState<'all' | OverallStatus>('all');
   const [record, setRecord] = useState<Row | null>(null);
   const [contactContext, setContactContext] = useState<{ customerId?: string; caseId?: string } | null>(null);
   const [customerImportOpen, setCustomerImportOpen] = useState(false);
+  const [financialCustomer, setFinancialCustomer] = useState<Row | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deletingCustomerId, setDeletingCustomerId] = useState('');
+  const [financialProfileExpanded, setFinancialProfileExpanded] = useState(false);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
-  const [pendingContactSearch, setPendingContactSearch] = useState<Record<string, boolean>>({});
-  const contactSearchLocks = useRef(new Set<string>());
   const [sheetStatus, setSheetStatus] = useState<
     'checking' | 'connected' | 'mismatch' | 'error'
   >('checking');
   const [sheetMessage, setSheetMessage] = useState('');
 
   useEffect(() => {
-    if (!selectedCustomer) return;
+    if (!selectedCustomer && !deleteTarget) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSelectedCustomer(null);
+      if (event.key === 'Escape') {
+        if (deleteTarget && !deletingCustomerId) {
+          setDeleteTarget(null);
+          setDeleteConfirmation('');
+        } else if (selectedCustomer) {
+          setSelectedCustomer(null);
+          setFinancialProfileExpanded(false);
+        }
+      }
     };
     window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [selectedCustomer]);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [selectedCustomer, deleteTarget, deletingCustomerId]);
 
   const load = async () => {
     setLoading(true);
@@ -163,22 +184,38 @@ export default function App() {
   const spec = specs.find(item => item.key === part)!;
   const customerSpec = specs.find(item => item.key === 'customers')!;
   const companyNameIndex = customerSpec.headers.indexOf('ชื่อบริษัท');
-  const contactSearchIndex = customerSpec.headers.indexOf(CONTACT_SEARCH_HEADER);
+  const phoneIndex = customerSpec.headers.indexOf('เบอร์โทรศัพท์');
+  const registrationIndex = customerSpec.headers.indexOf('เลขทะเบียนนิติบุคคล (13 หลัก)');
+  const registeredAtIndex = customerSpec.headers.indexOf('วันที่จดทะเบียน');
+  const directorsIndex = customerSpec.headers.indexOf('รายชื่อกรรมการ');
   const companySearch =
     part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
-  const visibleRows = useMemo(
-    () =>
-      (data[part] || []).filter(
-        row =>
-          !query ||
-          row.values.some(v =>
-            String(v ?? '')
-              .toLowerCase()
-              .includes(query.toLowerCase())
-          )
-      ),
-    [data, part, query]
+  const customerAssessments = useMemo(
+    () => new Map(data.customers.map(row => [row.id, assessFinancials(data.financials || [], row.id)])),
+    [data.customers, data.financials]
   );
+  const visibleRows = useMemo(
+    () => {
+      if (part === 'customers') return filterCustomerRegistryRows(data.customers, query, financialFilter, customerAssessments);
+      return (data[part] || []).filter(row => {
+        const matchesQuery = !query || row.values.some(v =>
+          String(v ?? '').toLowerCase().includes(query.toLowerCase())
+        );
+        return matchesQuery;
+      });
+    },
+    [data, part, query, financialFilter, customerAssessments]
+  );
+  const customerSummary = useMemo(() => {
+    const summary = { total: 0, pass: 0, fail: 0, incomplete: 0 };
+    if (part !== 'customers') return summary;
+    for (const row of visibleRows) {
+      summary.total += 1;
+      const status = customerAssessments.get(row.id)?.overall || 'incomplete';
+      summary[status] += 1;
+    }
+    return summary;
+  }, [part, visibleRows, customerAssessments]);
   const today = localDate();
   const customerCount = data.customers.filter(
     row => row.values[19] !== 'เก็บถาวร'
@@ -212,10 +249,23 @@ export default function App() {
 
   const beginContact = (context: { customerId?: string; caseId?: string } = {}) => {
     setSelectedCustomer(null);
+    setFinancialProfileExpanded(false);
     setRecord(null);
     setPart('contacts');
     setQuery('');
     setContactContext(context);
+    setError('');
+    setNotice('');
+  };
+  const openCompanyProfile = (customer: Row, showFinancials = false) => {
+    setFinancialProfileExpanded(showFinancials);
+    setSelectedCustomer(customer);
+  };
+  const openDeleteCompany = (customer: Row) => {
+    setSelectedCustomer(null);
+    setFinancialProfileExpanded(false);
+    setDeleteConfirmation('');
+    setDeleteTarget(customer);
     setError('');
     setNotice('');
   };
@@ -365,46 +415,6 @@ export default function App() {
     );
   };
 
-  async function toggleContactSearch(row: Row, checked: boolean) {
-    if (loading || sheetStatus !== 'connected' || contactSearchLocks.current.has(row.id)) return;
-    contactSearchLocks.current.add(row.id);
-    setPendingContactSearch(current => ({ ...current, [row.id]: checked }));
-    setError('');
-    setNotice('');
-    try {
-      const response = await api.put(
-        `/api/records/customers/${encodeURIComponent(row.id)}`,
-        contactSearchUpdate(customerSpec.headers, row, checked)
-      );
-      const saved = (response.data.data as Data).customers.find(item => item.id === row.id);
-      if (!saved) throw new Error('ไม่พบผลยืนยันการบันทึก กรุณารีเฟรช');
-      setData(current => ({
-        ...current,
-        customers: current.customers.map(item => item.id === row.id ? saved : item),
-      }));
-      setSelectedCustomer(current => current?.id === row.id ? saved : current);
-      setNotice(checked ? 'บันทึกผลค้นหา: ไม่พบข้อมูลช่องทางติดต่อแล้ว' : 'ยกเลิกเครื่องหมายผลค้นหาแล้ว');
-    } catch (cause) {
-      const failure = cause as { response?: { status?: number; data?: { error?: string } } };
-      const status = failure.response?.status;
-      const message = failure.response?.data?.error ||
-        (cause instanceof Error ? cause.message : 'บันทึกผลค้นหาไม่สำเร็จ');
-      if (status === 409) await load();
-      if (status === 401 || status === 403) {
-        setSheetStatus('error');
-        setSheetMessage('ไม่มีสิทธิ์บันทึก กรุณาตรวจสิทธิ์และโหลดหน้าใหม่');
-      }
-      setError(message);
-    } finally {
-      contactSearchLocks.current.delete(row.id);
-      setPendingContactSearch(current => {
-        const next = { ...current };
-        delete next[row.id];
-        return next;
-      });
-    }
-  }
-
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!record) return;
@@ -464,6 +474,31 @@ export default function App() {
       setData(response.data.data as Data);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'ลบไม่สำเร็จ');
+    }
+  }
+
+  async function deleteCompany() {
+    if (!deleteTarget) return;
+    const companyName = String(deleteTarget.values[companyNameIndex] || deleteTarget.id);
+    if (deleteConfirmation.trim() !== companyName) {
+      setError('กรุณาพิมพ์ชื่อบริษัทให้ตรงก่อนยืนยันลบ');
+      return;
+    }
+    setDeletingCustomerId(deleteTarget.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await api.delete(`/api/records/customers/${encodeURIComponent(deleteTarget.id)}`);
+      const result = response.data as { data: Data; deletedFinancials?: number };
+      setData(result.data);
+      setDeleteTarget(null);
+      setDeleteConfirmation('');
+      setNotice(`ลบบริษัท ${companyName} และข้อมูลงบที่เชื่อมโยง ${result.deletedFinancials || 0} รายการแล้ว`);
+    } catch (cause) {
+      const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(responseMessage || (cause instanceof Error ? cause.message : 'ลบบริษัทไม่สำเร็จ'));
+    } finally {
+      setDeletingCustomerId('');
     }
   }
 
@@ -586,6 +621,7 @@ export default function App() {
               onClick={() => {
                 setPart(key);
                 setQuery('');
+                setFinancialFilter('all');
                 setRecord(null);
                 setContactContext(null);
                 setCustomerImportOpen(false);
@@ -598,7 +634,7 @@ export default function App() {
         <section className="section-heading">
           <div>
             <h2>{names[part]}</h2>
-            <small>{data[part]?.length || 0} รายการ</small>
+            <small>{part === 'customers' ? `${visibleRows.length} จาก ${data.customers.length} รายการ` : `${data[part]?.length || 0} รายการ`}</small>
           </div>
           <div className="actions">
             <button className="button" onClick={exportCsv}>
@@ -618,12 +654,28 @@ export default function App() {
             ) : <small className="small-note">เพิ่มประวัติการติดต่อได้จากแท็บประวัติการติดต่อ</small>}
           </div>
         </section>
-        <input
-          className="search"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder={`ค้นหา${names[part]}`}
-        />
+        <div className="registry-filters">
+          <input
+            className="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={`ค้นหา${names[part]}`}
+          />
+          {part === 'customers' && <label className="financial-filter"><span>เกณฑ์ก่อนติดต่อ</span><select value={financialFilter} onChange={event => setFinancialFilter(event.target.value as typeof financialFilter)}>
+            <option value="all">ทั้งหมด</option>
+            <option value="pass">ผ่านเกณฑ์กรองเบื้องต้น</option>
+            <option value="fail">ไม่เข้าเกณฑ์กรองเบื้องต้น</option>
+            <option value="incomplete">ข้อมูลไม่พอประเมิน</option>
+          </select></label>}
+        </div>
+        {part === 'customers' && <p className="registry-result-count" aria-live="polite">แสดง {visibleRows.length} จาก {data.customers.length} รายการ</p>}
+        {part === 'customers' && <p className="screening-disclaimer">ผลนี้เป็นเกณฑ์กรองข้อมูลการเงินเบื้องต้น ไม่ใช่ผลอนุมัติสินเชื่อและไม่ยืนยันสิทธิ์ในการติดต่อ ต้องตรวจข้อห้ามติดต่อและ Call Verify แยกต่างหาก</p>}
+        {part === 'customers' && <section className="customer-summary-grid" aria-label="สรุปเกณฑ์ก่อนติดต่อของรายการที่แสดง">
+          <div><span>ลูกค้าที่แสดง</span><strong>{customerSummary.total}</strong></div>
+          <div className="pass"><span>ผ่านเกณฑ์</span><strong>{customerSummary.pass}</strong></div>
+          <div className="fail"><span>ไม่ผ่านเกณฑ์</span><strong>{customerSummary.fail}</strong></div>
+          <div className="incomplete"><span>ข้อมูลไม่พอประเมิน</span><strong>{customerSummary.incomplete}</strong></div>
+        </section>}
         {error && (
           <div className="error-banner" role="alert">{error}<button onClick={() => setError('')}>ปิด</button></div>
         )}
@@ -656,11 +708,29 @@ export default function App() {
             setNotice(replayed ? 'ยืนยันรายการเดิมใน Google Sheets แล้ว ไม่สร้างรายการซ้ำ' : 'บันทึกประวัติใหม่ลง Google Sheets แล้ว');
           }}
         />}
+        {financialCustomer && part === 'customers' && <FinancialEditorDialog
+          customer={financialCustomer}
+          companyName={String(financialCustomer.values[companyNameIndex] || financialCustomer.id)}
+          rows={data.financials || []}
+          disabled={loading || sheetStatus !== 'connected'}
+          onClose={() => setFinancialCustomer(null)}
+          onSaved={(saved, replayed) => {
+            setData(current => ({
+              ...current,
+              financials: [...(current.financials || []).filter(row => row.id !== saved.id), saved],
+            }));
+            setFinancialCustomer(null);
+            setNotice(replayed ? 'ยืนยันข้อมูลงบรายการเดิมแล้ว ไม่สร้างซ้ำ' : 'บันทึกข้อมูลงบและคำนวณเกณฑ์ใหม่แล้ว');
+          }}
+        />}
         {selectedCustomer && part === 'customers' && (
           <div
             className="modal-backdrop"
             onClick={event => {
-              if (event.target === event.currentTarget) setSelectedCustomer(null);
+              if (event.target === event.currentTarget) {
+                setSelectedCustomer(null);
+                setFinancialProfileExpanded(false);
+              }
             }}
           >
             <section
@@ -682,34 +752,78 @@ export default function App() {
                 <button
                   className="button"
                   type="button"
-                  onClick={() => setSelectedCustomer(null)}
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setFinancialProfileExpanded(false);
+                  }}
                   aria-label="ปิดข้อมูลบริษัท"
                 >
                   ปิด
                 </button>
               </div>
-              <p className="small-note details-note">
-                แสดงข้อมูลทั้งหมดจากทะเบียนลูกค้า · โหมดอ่านอย่างเดียว
-              </p>
-              <div className="details-grid">
-                {customerSpec.headers.map((header, index) => {
-                  const value = selectedCustomer.values[index];
-                  return (
-                    <div className="detail-field" key={header}>
-                      <span>{header}</span>
-                      <strong>{header === CONTACT_SEARCH_HEADER
-                        ? displayValue('customers', index, value, data)
-                        : isBlank(value) ? '—' : String(value)}</strong>
+              <div className="company-profile-content">
+                <p className="small-note details-note">ข้อมูลสำคัญสำหรับตรวจสอบบริษัทและประเมินเบื้องต้นก่อนติดต่อ</p>
+                <div className="details-grid company-profile-grid">
+                  {[
+                    ['ชื่อบริษัท', companyNameIndex],
+                    ['เลขทะเบียนนิติบุคคล (13 หลัก)', registrationIndex],
+                    ['วันที่จดทะเบียนจัดตั้ง', registeredAtIndex],
+                    ['รายชื่อผู้เป็นหุ้นส่วน / กรรมการ', directorsIndex],
+                  ].map(([label, rawIndex]) => {
+                    const index = Number(rawIndex);
+                    const value = selectedCustomer.values[index];
+                    return <div className={`detail-field ${index === directorsIndex ? 'wide' : ''}`} key={String(label)}>
+                      <span>{label}</span>
+                      <strong>{isBlank(value) ? '—' : String(value)}</strong>
+                    </div>;
+                  })}
+                </div>
+                <section className="company-financial-section">
+                  <button
+                    className="button financial-profile-toggle"
+                    type="button"
+                    aria-expanded={financialProfileExpanded}
+                    aria-controls={`financial-profile-${selectedCustomer.id}`}
+                    onClick={() => setFinancialProfileExpanded(expanded => !expanded)}
+                  >
+                    {financialProfileExpanded ? 'ซ่อนข้อมูลงบการเงิน' : 'ดูข้อมูลงบการเงิน'}
+                  </button>
+                  {financialProfileExpanded && <div id={`financial-profile-${selectedCustomer.id}`} className="financial-profile-panel">
+                    <div className="company-financial-heading">
+                      <div><p className="eyebrow">FINANCIAL PROFILE</p><h3>ข้อมูลงบการเงิน</h3></div>
+                      <button className="button primary" type="button" disabled={loading || sheetStatus !== 'connected'} onClick={() => {
+                        const customer = selectedCustomer;
+                        setSelectedCustomer(null);
+                        setFinancialProfileExpanded(false);
+                        setFinancialCustomer(customer);
+                      }}>เพิ่ม/แก้ไขงบ</button>
                     </div>
-                  );
-                })}
+                    <div className="company-financial-layout">
+                      <div><h4>งบย้อนหลัง</h4><FinancialHistory customerId={selectedCustomer.id} rows={data.financials || []} /></div>
+                      <div><h4>เกณฑ์ก่อนติดต่อ</h4><FinancialScreeningCell customerId={selectedCustomer.id} rows={data.financials || []} /></div>
+                    </div>
+                    <div className="financial-usage-note">
+                      <strong>วิธีใช้งาน</strong>
+                      <ol>
+                        <li>กรอกปีล่าสุดก่อน หากขาดทุนให้กรอกปีก่อนหน้าต่อเนื่อง สูงสุด 3 ปี</li>
+                        <li>ปีล่าสุดไม่ขาดทุน หรือพบปีที่ไม่ขาดทุนระหว่างตรวจย้อนหลัง ถือว่าผ่านด้านผลประกอบการ</li>
+                        <li>ขาดทุนครบ 3 ปีติดต่อกันถือว่าไม่ผ่าน</li>
+                        <li>ดอกเบี้ยจ่าย ÷ รายได้รวม × 100 ต้องต่ำกว่า 5% โดย 5% พอดีถือว่าไม่ผ่าน</li>
+                        <li>ข้อมูลไม่ครบจะแสดง “ข้อมูลไม่พอประเมิน”</li>
+                      </ol>
+                    </div>
+                  </div>}
+                </section>
               </div>
               <div className="modal-foot">
                 <button className="button primary" type="button" disabled={loading || sheetStatus !== 'connected'} onClick={() => beginContact({ customerId: selectedCustomer.id })}>เพิ่มประวัติการติดต่อ</button>
                 <button
                   className="button"
                   type="button"
-                  onClick={() => setSelectedCustomer(null)}
+                  onClick={() => {
+                    setSelectedCustomer(null);
+                    setFinancialProfileExpanded(false);
+                  }}
                 >
                   ปิดหน้าต่าง
                 </button>
@@ -717,6 +831,46 @@ export default function App() {
             </section>
           </div>
         )}
+        {deleteTarget && (() => {
+          const companyName = String(deleteTarget.values[companyNameIndex] || deleteTarget.id);
+          const linked = {
+            cases: data.cases.filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+            contacts: data.contacts.filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+            tasks: data.tasks.filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+            financials: (data.financials || []).filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+          };
+          const hasLinkedOperations = linked.cases + linked.contacts + linked.tasks > 0;
+          const deleting = deletingCustomerId === deleteTarget.id;
+          return <div className="modal-backdrop delete-company-backdrop">
+            <section className="modal delete-company-modal" role="dialog" aria-modal="true" aria-labelledby="delete-company-title">
+              <div className="modal-head">
+                <div>
+                  <small>ลบข้อมูลบริษัท</small>
+                  <h2 id="delete-company-title">{companyName}</h2>
+                </div>
+                <button className="button" type="button" disabled={deleting} onClick={() => { setDeleteTarget(null); setDeleteConfirmation(''); }} aria-label={`ปิดหน้าต่างลบบริษัท ${companyName}`}>ปิด</button>
+              </div>
+              <div className="delete-company-content">
+                {hasLinkedOperations ? <div className="delete-blocked-message" role="alert">
+                  <strong>ยังลบบริษัทนี้ไม่ได้</strong>
+                  <p>พบข้อมูลเชื่อมโยง: เคส {linked.cases} รายการ, ประวัติติดต่อ {linked.contacts} รายการ และงานติดตาม {linked.tasks} รายการ</p>
+                  <p>เพื่อไม่ให้ประวัติงานสูญหาย กรุณาแก้ไขทะเบียนและเปลี่ยนสถานะเป็น “เก็บถาวร” แทน</p>
+                </div> : <>
+                  <p className="delete-warning"><strong>การลบนี้กู้คืนไม่ได้</strong> บริษัทจะถูกลบออกจาก Google Sheets และข้อมูลงบที่เชื่อมโยง {linked.financials} รายการจะถูกลบพร้อมกัน</p>
+                  <label className="delete-confirmation-field">
+                    <span>พิมพ์ชื่อบริษัท <strong>{companyName}</strong> เพื่อยืนยัน</span>
+                    <input name="delete-company-confirmation" autoComplete="off" value={deleteConfirmation} disabled={deleting} onInput={event => setDeleteConfirmation(event.currentTarget.value)} />
+                  </label>
+                </>}
+                {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
+              </div>
+              <div className="modal-foot">
+                <button className="button" type="button" disabled={deleting} onClick={() => { setDeleteTarget(null); setDeleteConfirmation(''); }}>ยกเลิก</button>
+                {!hasLinkedOperations && <button className="button danger" type="button" disabled={deleting || deleteConfirmation.trim() !== companyName} onClick={() => void deleteCompany()} aria-label={`ยืนยันลบบริษัท ${companyName}`}>{deleting ? 'กำลังลบ…' : 'ลบบริษัทถาวร'}</button>}
+              </div>
+            </section>
+          </div>;
+        })()}
         {record && (
           <div className="modal-backdrop">
             <form className="modal edit-modal" onSubmit={save}>
@@ -757,70 +911,46 @@ export default function App() {
             </form>
           </div>
         )}
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                {columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}
-                {sheetStatus === 'connected' && <th>การดำเนินการ</th>}
-              </tr>
-            </thead>
+        <div className={`table-wrap ${part === 'customers' ? 'customer-registry-wrap' : ''}`}>
+          {part === 'customers' ? <table className="customer-registry-table">
+            <thead><tr><th>บริษัท</th><th>เบอร์โทรศัพท์</th><th>งบปีล่าสุด</th><th>เกณฑ์ก่อนติดต่อ</th><th>การดำเนินการ</th></tr></thead>
             <tbody>
-              {visibleRows.map(row => (
-                <tr key={row.id}>
-                  {columns[part].map(index => (
-                    <td key={index}>
-                      {part === 'customers' && index === companyNameIndex ? (
-                        <div className="company-registry-cell">
-                          <button
-                          type="button"
-                          className="company-name-button"
-                          onClick={() => setSelectedCustomer(row)}
-                          aria-haspopup="dialog"
-                          aria-label={`เปิดข้อมูลบริษัท ${String(row.values[companyNameIndex] || 'ไม่ระบุชื่อบริษัท')}`}
-                        >
-                          {displayValue(part, index, row.values[index], data)}
-                          </button>
-                          <label className="contact-search-control">
-                            <input
-                              type="checkbox"
-                              checked={pendingContactSearch[row.id] ?? isContactSearchChecked(row.values[contactSearchIndex])}
-                              disabled={loading || sheetStatus !== 'connected' || contactSearchLocks.current.has(row.id)}
-                              aria-label={`${CONTACT_SEARCH_LABEL} · ${row.id}`}
-                              aria-describedby={`contact-search-state-${encodeURIComponent(row.id)}`}
-                              onChange={event => void toggleContactSearch(row, event.target.checked)}
-                            />
-                            <span>{CONTACT_SEARCH_LABEL}</span>
-                          </label>
-                          <small
-                            id={`contact-search-state-${encodeURIComponent(row.id)}`}
-                            className="contact-search-state"
-                            role="status"
-                          >
-                            {contactSearchLocks.current.has(row.id)
-                              ? 'กำลังบันทึก…'
-                              : sheetStatus !== 'connected'
-                                ? 'ปิดการแก้ไข: ' + (sheetMessage || 'Google Sheets ยังไม่พร้อม')
-                                : 'บันทึกผลที่คุณตรวจแล้ว · เอาติ๊กออกเพื่อยกเลิกเครื่องหมาย'}
-                          </small>
-                        </div>
-                      ) : (
-                        displayValue(part, index, row.values[index], data)
-                      )}
-                    </td>
-                  ))}
-                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
-                </tr>
-              ))}
-              {!visibleRows.length && (
-                <tr>
-                  <td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
-                    {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
+              {visibleRows.map(row => {
+                const assessment = customerAssessments.get(row.id)!;
+                const companyName = String(row.values[companyNameIndex] || 'ไม่ระบุชื่อบริษัท');
+                const registration = row.values[registrationIndex];
+                const writeDisabled = loading || sheetStatus !== 'connected';
+                return <tr key={row.id}>
+                  <td data-label="บริษัท">
+                    <div className="company-registry-cell">
+                      <button type="button" className="company-name-button" onClick={() => openCompanyProfile(row)} aria-haspopup="dialog" aria-label={`เปิดข้อมูลบริษัท ${companyName}`}>{companyName}</button>
+                      {!isBlank(registration) && <small>เลขทะเบียน {String(registration)}</small>}
+                    </div>
                   </td>
-                </tr>
-              )}
+                  <td data-label="เบอร์โทรศัพท์" className={isBlank(row.values[phoneIndex]) ? 'muted-financial' : ''}>{isBlank(row.values[phoneIndex]) ? 'ไม่มีเบอร์โทร' : String(row.values[phoneIndex])}</td>
+                  <td data-label="งบปีล่าสุด" className="latest-financial-cell"><LatestFinancialCell customerId={row.id} rows={data.financials || []} /></td>
+                  <td data-label="เกณฑ์ก่อนติดต่อ" className="financial-screening-cell"><RegistryScreeningCell customerId={row.id} rows={data.financials || []} /></td>
+                  <td data-label="การดำเนินการ" className="row-actions registry-row-actions">
+                    {assessment.overall === 'pass' && <button className="button primary" type="button" disabled={writeDisabled} onClick={() => beginContact({ customerId: row.id })} aria-label={`เริ่มติดต่อ ${companyName}`}>เริ่มติดต่อ</button>}
+                    {assessment.overall === 'incomplete' && <button className="button primary" type="button" disabled={writeDisabled} onClick={() => setFinancialCustomer(row)} aria-label={`เพิ่มหรือแก้ไขงบ ${companyName}`}>เพิ่ม/แก้ไขงบ</button>}
+                    {assessment.overall === 'fail' && <><span className="registry-action-advice">ไม่แนะนำให้ติดต่อ</span><button className="button" type="button" onClick={() => openCompanyProfile(row, true)} aria-label={`ดูรายละเอียดเกณฑ์ ${companyName}`}>ดูรายละเอียด</button></>}
+                    <button className="button ghost" type="button" disabled={writeDisabled} onClick={() => beginEdit(row)} aria-label={`แก้ไขทะเบียน ${companyName}`}>แก้ไขทะเบียน</button>
+                    <button className="button danger ghost" type="button" disabled={writeDisabled || deletingCustomerId === row.id} onClick={() => openDeleteCompany(row)} aria-label={`ลบบริษัท ${companyName}`}>ลบบริษัท</button>
+                  </td>
+                </tr>;
+              })}
+              {!visibleRows.length && <tr><td colSpan={5} className="empty">{loading ? 'กำลังโหลด…' : query || financialFilter !== 'all' ? 'ไม่พบลูกค้าที่ตรงกับการค้นหาและตัวกรอง' : 'ยังไม่มีรายชื่อลูกค้า'}</td></tr>}
             </tbody>
-          </table>
+          </table> : <table>
+            <thead><tr>{columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}{sheetStatus === 'connected' && <th>การดำเนินการ</th>}</tr></thead>
+            <tbody>
+              {visibleRows.map(row => <tr key={row.id}>
+                {columns[part].map(index => <td key={index}>{displayValue(part, index, row.values[index], data)}</td>)}
+                {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
+              </tr>)}
+              {!visibleRows.length && <tr><td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">{loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}</td></tr>}
+            </tbody>
+          </table>}
         </div>
       </main>
 

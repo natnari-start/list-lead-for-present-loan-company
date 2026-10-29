@@ -133,7 +133,7 @@ describe('protected idempotent contact creation', () => {
       const body = payload(); body.values[index] = value;
       assert.equal((await invoke(body)).statusCode, 400);
     }
-    assert.equal((await invoke({ ...payload(), part: 'customers' })).statusCode, 405);
+    assert.equal((await invoke({ ...payload(), part: 'tasks' })).statusCode, 405);
     assert.equal(writes.length, 0);
   });
   it('leaves existing data intact on permission/header failures and stores formula-like text literally', async () => {
