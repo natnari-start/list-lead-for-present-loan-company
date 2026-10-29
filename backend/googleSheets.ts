@@ -446,15 +446,16 @@ export class GoogleSheetsConflictError extends Error {
 // makes the whole batch fail, including when requests reach different workers.
 async function createGoogleSheetsRecord(
   specs: SheetSpec[],
-  part: 'contacts' | 'customers',
+  part: 'contacts' | 'customers' | 'financials',
   receiptHash: string,
   values: unknown[]
 ) {
   const spec = specs.find(item => item.key === part);
   if (!spec || !/^[a-f0-9]{64}$/.test(receiptHash)) throw new Error('คำขอสร้างรายการไม่ถูกต้อง');
   const id = String(values[0]);
-  const label = part === 'contacts' ? 'ประวัติการติดต่อ' : 'ทะเบียนลูกค้า';
-  const receiptId = 'crm_' + (part === 'contacts' ? 'contact_' : 'customer_') + receiptHash;
+  const label = part === 'contacts' ? 'ประวัติการติดต่อ' : part === 'customers' ? 'ทะเบียนลูกค้า' : 'งบการเงินรายปี';
+  const receiptPart = part === 'contacts' ? 'contact_' : part === 'customers' ? 'customer_' : 'financial_';
+  const receiptId = 'crm_' + receiptPart + receiptHash;
   const expected = values.map((value, index) => normalizeValue(value, index, spec, 'th_TH'));
   const findSaved = async () => {
     const rows = ((await loadGoogleSheetsData([spec]))[part] || []).filter(row => row.id === id);
@@ -507,7 +508,9 @@ async function createGoogleSheetsRecord(
       ? (part === 'contacts'
         ? { type: 'DATE_TIME', pattern: 'yyyy-mm-dd hh:mm:ss' }
         : { type: 'DATE', pattern: 'yyyy-mm-dd' })
-      : { type: 'TEXT' };
+      : spec.numbers?.includes(index)
+        ? { type: 'NUMBER', pattern: '#,##0.00' }
+        : { type: 'TEXT' };
     return {
       userEnteredValue: typeof input === 'number' ? { numberValue: input } : { stringValue: String(input) },
       userEnteredFormat,
@@ -516,7 +519,7 @@ async function createGoogleSheetsRecord(
   });
   const requests = [
     { addNamedRange: { namedRange: {
-      namedRangeId: receiptId, name: 'CRM_' + (part === 'contacts' ? 'CONTACT_' : 'CUSTOMER_') + receiptHash,
+      namedRangeId: receiptId, name: 'CRM_' + (part === 'contacts' ? 'CONTACT_' : part === 'customers' ? 'CUSTOMER_' : 'FINANCIAL_') + receiptHash,
       range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 1 },
     } } },
     { appendCells: {
@@ -549,6 +552,10 @@ export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash:
 
 export async function createGoogleSheetsCustomer(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
   return createGoogleSheetsRecord(specs, 'customers', receiptHash, values);
+}
+
+export async function createGoogleSheetsFinancial(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+  return createGoogleSheetsRecord(specs, 'financials', receiptHash, values);
 }
 
 function canonicalValue(value: unknown): unknown {

@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
 import CustomerImportDialog from './CustomerImportDialog';
-import FinancialScreeningCell from './FinancialScreeningCell';
+import FinancialEditorDialog from './FinancialEditorDialog';
+import FinancialScreeningCell, { LatestFinancialCell } from './FinancialScreeningCell';
 import { assessFinancials, type OverallStatus } from './financial-screening';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
-  contactSearchUpdate,
   isContactSearchChecked,
 } from './contact-search-status';
 
@@ -37,7 +37,7 @@ const names: Record<Part, string> = {
 };
 const tabOrder: Part[] = ['customers', 'contacts', 'tasks', 'cases', 'documents'];
 const columns: Record<Part, number[]> = {
-  customers: [0, 2, 5, 7, 14, 19],
+  customers: [2, 14],
   cases: [0, 1, 3, 5, 7, 12, 13],
   contacts: [0, 1, 2, 3, 4, 6],
   tasks: [0, 1, 2, 3, 5, 7],
@@ -84,13 +84,12 @@ export default function App() {
   const [record, setRecord] = useState<Row | null>(null);
   const [contactContext, setContactContext] = useState<{ customerId?: string; caseId?: string } | null>(null);
   const [customerImportOpen, setCustomerImportOpen] = useState(false);
+  const [financialCustomer, setFinancialCustomer] = useState<Row | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
-  const [pendingContactSearch, setPendingContactSearch] = useState<Record<string, boolean>>({});
-  const contactSearchLocks = useRef(new Set<string>());
   const [sheetStatus, setSheetStatus] = useState<
     'checking' | 'connected' | 'mismatch' | 'error'
   >('checking');
@@ -167,7 +166,6 @@ export default function App() {
   const spec = specs.find(item => item.key === part)!;
   const customerSpec = specs.find(item => item.key === 'customers')!;
   const companyNameIndex = customerSpec.headers.indexOf('ชื่อบริษัท');
-  const contactSearchIndex = customerSpec.headers.indexOf(CONTACT_SEARCH_HEADER);
   const companySearch =
     part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
   const visibleRows = useMemo(
@@ -366,46 +364,6 @@ export default function App() {
       />
     );
   };
-
-  async function toggleContactSearch(row: Row, checked: boolean) {
-    if (loading || sheetStatus !== 'connected' || contactSearchLocks.current.has(row.id)) return;
-    contactSearchLocks.current.add(row.id);
-    setPendingContactSearch(current => ({ ...current, [row.id]: checked }));
-    setError('');
-    setNotice('');
-    try {
-      const response = await api.put(
-        `/api/records/customers/${encodeURIComponent(row.id)}`,
-        contactSearchUpdate(customerSpec.headers, row, checked)
-      );
-      const saved = (response.data.data as Data).customers.find(item => item.id === row.id);
-      if (!saved) throw new Error('ไม่พบผลยืนยันการบันทึก กรุณารีเฟรช');
-      setData(current => ({
-        ...current,
-        customers: current.customers.map(item => item.id === row.id ? saved : item),
-      }));
-      setSelectedCustomer(current => current?.id === row.id ? saved : current);
-      setNotice(checked ? 'บันทึกผลค้นหา: ไม่พบข้อมูลช่องทางติดต่อแล้ว' : 'ยกเลิกเครื่องหมายผลค้นหาแล้ว');
-    } catch (cause) {
-      const failure = cause as { response?: { status?: number; data?: { error?: string } } };
-      const status = failure.response?.status;
-      const message = failure.response?.data?.error ||
-        (cause instanceof Error ? cause.message : 'บันทึกผลค้นหาไม่สำเร็จ');
-      if (status === 409) await load();
-      if (status === 401 || status === 403) {
-        setSheetStatus('error');
-        setSheetMessage('ไม่มีสิทธิ์บันทึก กรุณาตรวจสิทธิ์และโหลดหน้าใหม่');
-      }
-      setError(message);
-    } finally {
-      contactSearchLocks.current.delete(row.id);
-      setPendingContactSearch(current => {
-        const next = { ...current };
-        delete next[row.id];
-        return next;
-      });
-    }
-  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -668,6 +626,21 @@ export default function App() {
             setNotice(replayed ? 'ยืนยันรายการเดิมใน Google Sheets แล้ว ไม่สร้างรายการซ้ำ' : 'บันทึกประวัติใหม่ลง Google Sheets แล้ว');
           }}
         />}
+        {financialCustomer && part === 'customers' && <FinancialEditorDialog
+          customer={financialCustomer}
+          companyName={String(financialCustomer.values[companyNameIndex] || financialCustomer.id)}
+          rows={data.financials || []}
+          disabled={loading || sheetStatus !== 'connected'}
+          onClose={() => setFinancialCustomer(null)}
+          onSaved={(saved, replayed) => {
+            setData(current => ({
+              ...current,
+              financials: [...(current.financials || []).filter(row => row.id !== saved.id), saved],
+            }));
+            setFinancialCustomer(null);
+            setNotice(replayed ? 'ยืนยันข้อมูลงบรายการเดิมแล้ว ไม่สร้างซ้ำ' : 'บันทึกข้อมูลงบและคำนวณเกณฑ์ใหม่แล้ว');
+          }}
+        />}
         {selectedCustomer && part === 'customers' && (
           <div
             className="modal-backdrop"
@@ -774,6 +747,7 @@ export default function App() {
             <thead>
               <tr>
                 {columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}
+                {part === 'customers' && <th>ข้อมูลงบการเงินปีล่าสุด</th>}
                 {part === 'customers' && <th>เกณฑ์ก่อนติดต่อ</th>}
                 {sheetStatus === 'connected' && <th>การดำเนินการ</th>}
               </tr>
@@ -794,41 +768,20 @@ export default function App() {
                         >
                           {displayValue(part, index, row.values[index], data)}
                           </button>
-                          <label className="contact-search-control">
-                            <input
-                              type="checkbox"
-                              checked={pendingContactSearch[row.id] ?? isContactSearchChecked(row.values[contactSearchIndex])}
-                              disabled={loading || sheetStatus !== 'connected' || contactSearchLocks.current.has(row.id)}
-                              aria-label={`${CONTACT_SEARCH_LABEL} · ${row.id}`}
-                              aria-describedby={`contact-search-state-${encodeURIComponent(row.id)}`}
-                              onChange={event => void toggleContactSearch(row, event.target.checked)}
-                            />
-                            <span>{CONTACT_SEARCH_LABEL}</span>
-                          </label>
-                          <small
-                            id={`contact-search-state-${encodeURIComponent(row.id)}`}
-                            className="contact-search-state"
-                            role="status"
-                          >
-                            {contactSearchLocks.current.has(row.id)
-                              ? 'กำลังบันทึก…'
-                              : sheetStatus !== 'connected'
-                                ? 'ปิดการแก้ไข: ' + (sheetMessage || 'Google Sheets ยังไม่พร้อม')
-                                : 'บันทึกผลที่คุณตรวจแล้ว · เอาติ๊กออกเพื่อยกเลิกเครื่องหมาย'}
-                          </small>
                         </div>
                       ) : (
                         displayValue(part, index, row.values[index], data)
                       )}
                     </td>
                   ))}
+                  {part === 'customers' && <td className="latest-financial-cell"><LatestFinancialCell customerId={row.id} rows={data.financials || []} /></td>}
                   {part === 'customers' && <td className="financial-screening-cell"><FinancialScreeningCell customerId={row.id} rows={data.financials || []} /></td>}
-                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
+                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'customers' && <button type="button" onClick={() => setFinancialCustomer(row)}>เพิ่ม/แก้ไขงบ</button>}{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
                 </tr>
               ))}
               {!visibleRows.length && (
                 <tr>
-                  <td colSpan={columns[part].length + (part === 'customers' ? 1 : 0) + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
+                  <td colSpan={columns[part].length + (part === 'customers' ? 2 : 0) + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
                     {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
                   </td>
                 </tr>

@@ -8,6 +8,17 @@ const amount = (value: number | null) => value === null
 
 const mark = (status: 'pass' | 'fail' | 'unknown') => status === 'pass' ? '✓' : status === 'fail' ? '✕' : '?';
 
+export function LatestFinancialCell({ customerId, rows }: Props) {
+  const latest = assessFinancials(rows, customerId).periods[0];
+  if (!latest) return <span className="muted-financial">ยังไม่มีข้อมูล</span>;
+  return <div className="latest-financial">
+    <strong>ปี {latest.year}{latest.duplicate ? ' · พบรายการซ้ำ' : ''}</strong>
+    <span>กำไร (ขาดทุน) สุทธิ: {amount(latest.netProfit)} บาท</span>
+    <span>รายได้รวม: {amount(latest.revenue)} บาท</span>
+    <span>ดอกเบี้ยจ่าย: {amount(latest.interestExpense)} บาท</span>
+  </div>;
+}
+
 export default function FinancialScreeningCell({ customerId, rows }: Props) {
   const result = assessFinancials(rows, customerId);
   const ratio = result.interestRatio === null
@@ -26,17 +37,5 @@ export default function FinancialScreeningCell({ customerId, rows }: Props) {
       <small>{criterionLabel(result.interestBurden)}{ratio} · เกณฑ์ต่ำกว่า 5%</small>
     </div>
     {result.reason && <small className="screening-reason">{result.reason}</small>}
-    {!!result.periods.length && <details className="screening-details">
-      <summary>ดูรายละเอียดงบ</summary>
-      <div className="screening-periods">
-        {result.periods.slice(0, 3).map(period => <div key={`${period.year}-${period.id}`}>
-          <strong>ปี {period.year}{period.duplicate ? ' · พบรายการซ้ำ' : ''}</strong>
-          <span>รายได้ {amount(period.revenue)} บาท</span>
-          <span>กำไรสุทธิ {amount(period.netProfit)} บาท</span>
-          <span>ดอกเบี้ยจ่าย {amount(period.interestExpense)} บาท</span>
-          <small>{period.source ? `แหล่ง: ${period.source}` : 'ยังไม่ระบุแหล่งข้อมูล'}{period.reviewedAt ? ` · ตรวจ ${period.reviewedAt}` : ''}</small>
-        </div>)}
-      </div>
-    </details>}
   </div>;
 }

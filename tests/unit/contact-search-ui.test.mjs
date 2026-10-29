@@ -50,74 +50,35 @@ const bundle = await build({
 });
 const { default: App } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 
-describe('customer contact-search control', () => {
-  it('isolates duplicate company names, persists a confirmed result and recovers from failures/conflicts', async () => {
+describe('customer registry essentials', () => {
+  it('keeps the compact table focused while preserving contact-search editing in the customer form', async () => {
     const dom = new JSDOM('<div id="root"></div>', { url: 'https://synthetic.invalid', pretendToBeVisual: true });
     for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'Event', 'MouseEvent']) {
       Object.defineProperty(globalThis, key, { value: key === 'window' ? dom.window : dom.window[key], configurable: true });
     }
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     let root = createRoot(document.getElementById('root'));
-    const control = id => document.querySelector(`input[aria-label="${CONTACT_SEARCH_LABEL} · ${id}"]`);
     const click = async node => { assert.ok(node); await act(async () => node.click()); };
     const mount = async () => { await act(async () => root.render(createElement(App))); };
     try {
+      dom.window.confirm = () => true;
       await mount();
-      assert.equal(control('SYN-UI-001').checked, false);
-      let release;
-      state.gate = new Promise(resolve => { release = resolve; });
-      await click(control('SYN-UI-001'));
-      assert.equal(control('SYN-UI-001').checked, true);
-      assert.equal(control('SYN-UI-001').disabled, true);
-      await click(control('SYN-UI-001'));
+      const headers = [...document.querySelectorAll('thead th')].map(node => node.textContent);
+      assert.deepEqual(headers, ['ชื่อบริษัท', 'เบอร์โทรศัพท์', 'ข้อมูลงบการเงินปีล่าสุด', 'เกณฑ์ก่อนติดต่อ', 'การดำเนินการ']);
+      assert.equal(document.querySelector(`input[aria-label="${CONTACT_SEARCH_LABEL} · SYN-UI-001"]`), null);
+      const firstActions = document.querySelector('tbody tr .row-actions');
+      await click([...firstActions.querySelectorAll('button')].find(node => node.textContent === 'แก้ไข'));
+      const control = document.querySelector('form .contact-search-input');
+      assert.equal(control.checked, false);
+      await click(control);
+      await click([...document.querySelectorAll('form button')].find(node => node.textContent === 'บันทึกการแก้ไข'));
       assert.equal(state.calls.length, 1);
-      await act(async () => { release(); await state.gate; });
-      state.gate = null;
-      assert.equal(control('SYN-UI-001').disabled, false);
-      assert.equal(control('SYN-UI-002').checked, false);
-      assert.equal(document.querySelector('[role="dialog"]'), null);
-      assert.equal(document.querySelector('form'), null);
       assert.equal(state.calls[0].payload.values[flag], 'TRUE');
       assert.equal(state.data.customers[0].values[23], 'Original synthetic note');
-
-      await click([...document.querySelectorAll('button')].find(node => node.textContent === 'รีเฟรช'));
-      assert.equal(control('SYN-UI-001').checked, true);
-      state.fault = 502;
-      await click(control('SYN-UI-001'));
-      assert.equal(control('SYN-UI-001').checked, true);
-      assert.match(document.querySelector('[role="alert"]').textContent, /Synthetic save failure/);
-      assert.equal(document.querySelector('.success-banner'), null);
-
-      state.fault = null;
-      state.data.customers[0].values[flag] = 'FALSE';
-      state.data.customers[0].values[23] = 'New peer note';
-      await click(control('SYN-UI-001'));
-      assert.equal(control('SYN-UI-001').checked, false);
-      assert.match(document.querySelector('[role="alert"]').textContent, /Synthetic conflict/);
-      assert.equal(state.data.customers[0].values[23], 'New peer note');
-
-      await click(control('SYN-UI-001'));
-      await click(control('SYN-UI-001'));
-      assert.equal(state.data.customers[0].values[flag], 'FALSE');
       await click(document.querySelector('.company-name-button'));
       assert.ok(document.querySelector('[role="dialog"]').textContent.includes(CONTACT_SEARCH_HEADER));
-      assert.ok(document.querySelector('[role="dialog"]').textContent.includes('ยังไม่ติ๊ก'));
+      assert.ok(document.querySelector('[role="dialog"]').textContent.includes(CONTACT_SEARCH_LABEL));
       await click(document.querySelector('[aria-label="ปิดข้อมูลบริษัท"]'));
-      await click(document.querySelector('.row-actions button'));
-      assert.equal(document.querySelector('form .contact-search-input').type, 'checkbox');
-      assert.ok(document.querySelector('form .company-search-link'));
-      await click([...document.querySelectorAll('form button')].find(node => node.textContent === 'ยกเลิก'));
-
-      await act(async () => root.unmount());
-      root = createRoot(document.getElementById('root'));
-      await mount();
-      assert.equal(control('SYN-UI-001').checked, false);
-      state.connected = false;
-      await act(async () => root.unmount());
-      root = createRoot(document.getElementById('root'));
-      await mount();
-      assert.equal(control('SYN-UI-001').disabled, true);
-      assert.match(document.querySelector('.contact-search-state').textContent, /ปิดการแก้ไข/);
     } finally {
       await act(async () => root.unmount());
       dom.window.close();

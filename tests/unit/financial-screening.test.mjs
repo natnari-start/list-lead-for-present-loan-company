@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { assessFinancials, financialSchema } from '../../src/financial-screening.ts';
+import { assessFinancials, financialSchema, validateFinancialEntry } from '../../src/financial-screening.ts';
 
 const i = Object.fromEntries(financialSchema.headers.map((header, index) => [header, index]));
 const row = (year, revenue, profit, interest, id = `FIN-${year}`) => {
@@ -16,6 +16,12 @@ const row = (year, revenue, profit, interest, id = `FIN-${year}`) => {
 };
 
 describe('financial screening before contact', () => {
+  it('validates manual financial input without rejecting a legitimate loss', () => {
+    assert.equal(validateFinancialEntry(2025, 1000000, -250000, 25000, 2026), null);
+    assert.match(validateFinancialEntry(2027, 1000000, 1, 1, 2026), /ปีงบ/);
+    assert.match(validateFinancialEntry(2025, 0, 1, 1, 2026), /รายได้รวม/);
+    assert.match(validateFinancialEntry(2025, 1000000, 1, -1, 2026), /ดอกเบี้ยจ่าย/);
+  });
   it('passes when the latest three years are not all losses and interest is below 5%', () => {
     const result = assessFinancials([row(2025, 100, 1, 4.99), row(2024, 90, -1, 2), row(2023, 80, -2, 2)], 'CUST-1');
     assert.equal(result.profitability, 'pass');

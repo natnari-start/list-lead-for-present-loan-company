@@ -47,6 +47,24 @@ export type FinancialAssessment = {
   reason: string;
 };
 
+export function validateFinancialEntry(
+  year: unknown,
+  revenue: unknown,
+  netProfit: unknown,
+  interestExpense: unknown,
+  currentYear = new Date().getFullYear()
+): string | null {
+  const parsedYear = Number(year);
+  const parsedRevenue = Number(revenue);
+  const parsedProfit = Number(netProfit);
+  const parsedInterest = Number(interestExpense);
+  if (year === '' || year === null || !Number.isInteger(parsedYear) || parsedYear < 1900 || parsedYear > currentYear) return 'กรุณากรอกปีงบ ค.ศ. ที่ถูกต้อง';
+  if (revenue === '' || revenue === null || !Number.isFinite(parsedRevenue) || parsedRevenue <= 0) return 'รายได้รวมต้องมากกว่า 0';
+  if (netProfit === '' || netProfit === null || !Number.isFinite(parsedProfit)) return 'กรุณากรอกกำไรหรือขาดทุนสุทธิ โดยใช้เครื่องหมายลบเมื่อขาดทุน';
+  if (interestExpense === '' || interestExpense === null || !Number.isFinite(parsedInterest) || parsedInterest < 0) return 'ดอกเบี้ยจ่ายต้องเป็น 0 หรือมากกว่า';
+  return null;
+}
+
 const numeric = (value: unknown): number | null => {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const parsed = typeof value === 'number'

@@ -9,9 +9,9 @@ import {
 import { schemas } from '../src/schema';
 import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-search-status';
 import { contactIndexes, validateContactValues } from '../src/contact-log';
-import { financialSchema } from '../src/financial-screening';
+import { financialSchema, validateFinancialEntry } from '../src/financial-screening';
 import { createHash } from 'node:crypto';
-import { createGoogleSheetsContact, createGoogleSheetsCustomer, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
+import { createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
   key: string;
@@ -91,6 +91,13 @@ function validateCustomerCreate(spec: SheetSpec, values: unknown[]): string | nu
   return null;
 }
 
+function validateFinancialValues(spec: SheetSpec, values: unknown[]): string | null {
+  if (values.length !== spec.headers.length) return 'จำนวนช่องงบการเงินไม่ตรงกับ schema';
+  const currentYear = Number(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Bangkok', year: 'numeric' }).format(new Date()));
+  if (!String(values[1] ?? '').trim()) return 'ไม่พบรหัสลูกค้า';
+  return validateFinancialEntry(values[2], values[3], values[4], values[5], currentYear);
+}
+
 export const handler = router({
   'GET /api/session': [...auth, async () => json({ authorized: true })],
   'GET /api/integration/google-sheets/status': [
@@ -134,13 +141,37 @@ export const handler = router({
     ...auth,
     async ({ body, user }) => {
       const payload = body as { part?: unknown; requestId?: unknown; values?: unknown } | null;
-      if (payload?.part !== 'contacts' && payload?.part !== 'customers') return error('รุ่นนี้เพิ่มได้เฉพาะทะเบียนลูกค้าและประวัติการติดต่อ', 405);
+      if (payload?.part !== 'contacts' && payload?.part !== 'customers' && payload?.part !== 'financials') return error('ประเภทข้อมูลนี้ยังไม่รองรับการเพิ่ม', 405);
       const spec = SPECS.find(item => item.key === payload.part)!;
       if (typeof payload.requestId !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(payload.requestId) || !Array.isArray(payload.values)) {
         return error('รูปแบบคำขอสร้างรายการไม่ถูกต้อง', 400);
       }
       const values = [...payload.values];
       const hash = createHash('sha256').update(user!.userId + ':' + payload.requestId).digest('hex');
+      if (payload.part === 'financials') {
+        if (values[0] !== null) return error('รหัสงบการเงินต้องสร้างโดย backend', 400);
+        values[6] = 'กรอกใน WebApp';
+        values[7] = bangkokDate();
+        values[8] = user!.email || user!.userId;
+        const invalidFinancial = validateFinancialValues(spec, values);
+        if (invalidFinancial) return error(invalidFinancial, 400);
+        try {
+          const current = await loadGoogleSheetsData(SPECS);
+          if (!current.customers.some(row => row.id === String(values[1]))) return error('ไม่พบลูกค้าในทะเบียน', 400);
+          const year = Number(values[2]);
+          const stableHash = createHash('sha256').update('financial:' + String(values[1]) + ':' + year).digest('hex');
+          values[0] = 'FINANCIAL-' + stableHash.slice(0, 32).toUpperCase();
+          const duplicate = (current.financials || []).find(row =>
+            String(row.values[1]) === String(values[1]) && Number(row.values[2]) === year
+          );
+          if (duplicate && duplicate.id !== values[0]) return error('ลูกค้ารายนี้มีข้อมูลงบปีดังกล่าวแล้ว กรุณาแก้ไขรายการเดิม', 409);
+          return json(await createGoogleSheetsFinancial(SPECS, stableHash, values));
+        } catch (cause) {
+          if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
+          const failure = describeGoogleSheetsFailure(cause);
+          return error('ยังยืนยันการบันทึกงบการเงินไม่ได้: ' + failure.message, failure.status === 403 ? 403 : 502);
+        }
+      }
       if (payload.part === 'customers') {
         if (values[0] !== null) return error('รหัสลูกค้าต้องสร้างโดย backend', 400);
         const today = bangkokDate();
@@ -192,10 +223,9 @@ export const handler = router({
 
   'PUT /api/records/:part/:id': [
     ...auth,
-    async ({ body, params }) => {
+    async ({ body, params, user }) => {
       const spec = SPECS.find(item => item.key === params.part);
       if (!spec) return error('ไม่พบประเภทข้อมูลที่ต้องการแก้ไข', 404);
-      if (spec.key === 'financials') return error('ข้อมูลงบการเงินรายปีเป็นโหมดอ่านอย่างเดียวใน WebApp', 405);
       const payload = body as { values?: unknown; expectedValues?: unknown } | null;
       if (!payload || !Array.isArray(payload.values) || !Array.isArray(payload.expectedValues) ||
         payload.values.length !== spec.headers.length || payload.expectedValues.length !== spec.headers.length) {
@@ -212,6 +242,14 @@ export const handler = router({
       }
       if (values.some(value => typeof value === 'string' && value.length > 20000)) {
         return error('ข้อมูลบางช่องยาวเกินขีดจำกัด', 400);
+      }
+      if (spec.key === 'financials') {
+        if (String(values[1]) !== String(expectedValues[1])) return error('ไม่สามารถเปลี่ยนเจ้าของข้อมูลงบได้', 400);
+        values[6] = expectedValues[6] || 'กรอกใน WebApp';
+        values[7] = bangkokDate();
+        values[8] = user!.email || user!.userId;
+        const invalidFinancial = validateFinancialValues(spec, values);
+        if (invalidFinancial) return error(invalidFinancial, 400);
       }
       const changed = (index: number) =>
         JSON.stringify(values[index] ?? null) !== JSON.stringify(expectedValues[index] ?? null);
@@ -260,6 +298,12 @@ export const handler = router({
             row.id !== id && String(row.values[registrationIndex] ?? '').trim() === registration
           )) {
             return error('เลขทะเบียนนิติบุคคลนี้ซ้ำกับรายการอื่น กรุณาตรวจสอบก่อนบันทึก', 409);
+          }
+        }
+        if (spec.key === 'financials') {
+          if (!current.customers.some(row => row.id === String(values[1]))) return error('ไม่พบลูกค้าในทะเบียน', 400);
+          if (rows.some(row => row.id !== id && String(row.values[1]) === String(values[1]) && Number(row.values[2]) === Number(values[2]))) {
+            return error('ลูกค้ารายนี้มีข้อมูลงบปีดังกล่าวแล้ว', 409);
           }
         }
         if (spec.key === 'cases' || spec.key === 'contacts' || spec.key === 'tasks') {

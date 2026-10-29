@@ -289,6 +289,11 @@ p {
 .financial-filter { display: grid; gap: 5px; color: #53657a; font-size: 12px; }
 .financial-filter select { min-width: 230px; padding: 10px 12px; border: 1px solid #d9e1ea; border-radius: 8px; background: #fff; }
 .screening-disclaimer { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid #7b8796; background: #f8fafc; color: #53657a; font-size: 12px; line-height: 1.6; }
+.latest-financial-cell { min-width: 250px; }
+.latest-financial { display: grid; gap: 4px; }
+.latest-financial strong { color: #24364b; }
+.latest-financial span { color: #53657a; font-size: 12px; }
+.muted-financial { color: #7b8796; }
 .financial-screening-cell { min-width: 270px; }
 .financial-screening { display: grid; gap: 8px; }
 .screening-summary { width: fit-content; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
@@ -307,6 +312,16 @@ p {
 .screening-periods { display: grid; gap: 7px; margin-top: 8px; }
 .screening-periods > div { display: grid; gap: 2px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fbfcfe; }
 .screening-periods span, .screening-periods small { color: #53657a; font-size: 11px; }
+.financial-editor { width: min(760px, 100%); }
+.financial-year-picker { display: flex; align-items: end; gap: 10px; margin: 14px 0; }
+.financial-year-picker label { display: grid; flex: 1; gap: 6px; color: #53657a; font-size: 12px; }
+.financial-year-picker select { width: 100%; padding: 10px; border: 1px solid #c8d1df; border-radius: 8px; background: #fff; }
+.financial-form-grid { margin-bottom: 14px; }
+.financial-preview { display: grid; gap: 5px; margin: 4px 0 16px; padding: 12px; border: 1px solid #d8e1ea; border-radius: 9px; background: #f8fafc; }
+.financial-preview.pass { border-color: #98d4a9; background: #eef9f1; }
+.financial-preview.fail { border-color: #efb0a8; background: #fff4f2; }
+.financial-preview.incomplete { border-color: #e7c77d; background: #fff9eb; }
+.financial-preview span, .financial-preview small { color: #53657a; }
 .table-wrap {
   overflow: auto;
   border: 1px solid #e2e8f0;
@@ -632,6 +647,7 @@ td {
   }
   .registry-filters { align-items: stretch; flex-direction: column; }
   .financial-filter select { width: 100%; min-width: 0; }
+  .financial-year-picker { align-items: stretch; flex-direction: column; }
   .actions {
     flex-wrap: wrap;
   }
