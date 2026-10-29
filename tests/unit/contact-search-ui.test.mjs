@@ -64,7 +64,9 @@ describe('customer registry essentials', () => {
       dom.window.confirm = () => true;
       await mount();
       const headers = [...document.querySelectorAll('thead th')].map(node => node.textContent);
-      assert.deepEqual(headers, ['ชื่อบริษัท', 'เบอร์โทรศัพท์', 'ข้อมูลงบการเงินปีล่าสุด', 'เกณฑ์ก่อนติดต่อ', 'การดำเนินการ']);
+      assert.deepEqual(headers, ['ชื่อบริษัท', 'เบอร์โทรศัพท์', 'การดำเนินการ']);
+      assert.equal(document.querySelector('tbody .latest-financial'), null);
+      assert.equal(document.querySelector('tbody .financial-screening'), null);
       assert.equal(document.querySelector(`input[aria-label="${CONTACT_SEARCH_LABEL} · SYN-UI-001"]`), null);
       const firstActions = document.querySelector('tbody tr .row-actions');
       await click([...firstActions.querySelectorAll('button')].find(node => node.textContent === 'แก้ไข'));
