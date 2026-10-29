@@ -42,7 +42,7 @@ export default function FinancialScreeningCell({ customerId, rows }: Props) {
     <div className={`screening-criterion ${result.profitability}`}>
       <b aria-hidden="true">{mark(result.profitability)}</b>
       <span>ผลประกอบการ</span>
-      <small>{criterionLabel(result.profitability)} · ไม่ขาดทุนต่อเนื่อง 3 ปี</small>
+      <small>{criterionLabel(result.profitability)} · {result.profitabilityReason}</small>
     </div>
     <div className={`screening-criterion ${result.interestBurden}`}>
       <b aria-hidden="true">{mark(result.interestBurden)}</b>

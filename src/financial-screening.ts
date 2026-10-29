@@ -40,6 +40,7 @@ export type FinancialPeriod = {
 export type FinancialAssessment = {
   overall: OverallStatus;
   profitability: CriterionStatus;
+  profitabilityReason: string;
   interestBurden: CriterionStatus;
   interestRatio: number | null;
   latestYear: number | null;
@@ -100,11 +101,44 @@ export function assessFinancials(rows: FinancialRow[], customerId: string): Fina
 
   const latest = periods[0];
   let profitability: CriterionStatus = 'unknown';
+  let profitabilityReason = 'ยังไม่มีข้อมูลงบการเงินรายปี';
   if (latest) {
-    const years = [latest.year, latest.year - 1, latest.year - 2];
-    const three = years.map(year => periods.find(period => period.year === year));
-    if (three.every((period): period is FinancialPeriod => !!period && !period.duplicate && period.netProfit !== null)) {
-      profitability = three.every(period => (period.netProfit as number) < 0) ? 'fail' : 'pass';
+    if (latest.duplicate) {
+      profitabilityReason = `พบข้อมูลงบปี ${latest.year} ซ้ำ ต้องตรวจสอบก่อน`;
+    } else if (latest.netProfit === null) {
+      profitabilityReason = `ข้อมูลกำไรสุทธิปี ${latest.year} ไม่ถูกต้อง`;
+    } else if (latest.netProfit >= 0) {
+      profitability = 'pass';
+      profitabilityReason = 'ปีล่าสุดมีกำไรหรือไม่ขาดทุน';
+    } else {
+      const previousYear = latest.year - 1;
+      const previous = periods.find(period => period.year === previousYear);
+      if (!previous) {
+        profitabilityReason = `ปีล่าสุดขาดทุน กรุณาเพิ่มข้อมูลกำไรสุทธิปี ${previousYear} (ปีก่อนหน้า)`;
+      } else if (previous.duplicate) {
+        profitabilityReason = `พบข้อมูลงบปี ${previousYear} ซ้ำ ต้องตรวจสอบก่อน`;
+      } else if (previous.netProfit === null) {
+        profitabilityReason = `ข้อมูลกำไรสุทธิปี ${previousYear} ไม่ถูกต้อง`;
+      } else if (previous.netProfit >= 0) {
+        profitability = 'pass';
+        profitabilityReason = 'ไม่ขาดทุนต่อเนื่องครบ 3 ปี';
+      } else {
+        const thirdYear = previousYear - 1;
+        const third = periods.find(period => period.year === thirdYear);
+        if (!third) {
+          profitabilityReason = `ขาดทุนต่อเนื่อง 2 ปี กรุณาเพิ่มข้อมูลกำไรสุทธิปี ${thirdYear} (ย้อนหลังอีก 1 ปี)`;
+        } else if (third.duplicate) {
+          profitabilityReason = `พบข้อมูลงบปี ${thirdYear} ซ้ำ ต้องตรวจสอบก่อน`;
+        } else if (third.netProfit === null) {
+          profitabilityReason = `ข้อมูลกำไรสุทธิปี ${thirdYear} ไม่ถูกต้อง`;
+        } else if (third.netProfit >= 0) {
+          profitability = 'pass';
+          profitabilityReason = 'ไม่ขาดทุนต่อเนื่องครบ 3 ปี';
+        } else {
+          profitability = 'fail';
+          profitabilityReason = 'ขาดทุนต่อเนื่อง 3 ปี';
+        }
+      }
     }
   }
 
@@ -126,12 +160,12 @@ export function assessFinancials(rows: FinancialRow[], customerId: string): Fina
     : latest.duplicate
       ? `พบข้อมูลงบปี ${latest.year} ซ้ำ ต้องตรวจสอบก่อน`
       : profitability === 'unknown'
-        ? 'ต้องมีข้อมูลกำไรสุทธิ 3 ปีติดต่อกัน'
+        ? profitabilityReason
         : interestBurden === 'unknown'
           ? 'ต้องมีรายได้รวมและดอกเบี้ยจ่ายของปีล่าสุดเดียวกัน'
           : '';
 
-  return { overall, profitability, interestBurden, interestRatio, latestYear: latest?.year ?? null, periods, reason };
+  return { overall, profitability, profitabilityReason, interestBurden, interestRatio, latestYear: latest?.year ?? null, periods, reason };
 }
 
 export const overallLabel = (status: OverallStatus) => status === 'pass'

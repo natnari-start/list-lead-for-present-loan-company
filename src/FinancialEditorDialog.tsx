@@ -99,7 +99,7 @@ export default function FinancialEditorDialog({ customer, companyName, rows, dis
         <div><p className="eyebrow">FINANCIAL DATA</p><h2>เพิ่มข้อมูลงบการเงิน</h2><p className="small-note">{companyName}</p></div>
         <button className="button" type="button" onClick={onClose}>ปิด</button>
       </div>
-      <p className="small-note">กรอกงบทีละปีอย่างน้อย 3 ปีติดต่อกัน ระบบจะแสดงเฉพาะปีล่าสุดในตารางและคำนวณเกณฑ์ให้อัตโนมัติ</p>
+      <p className="small-note">กรอกปีล่าสุดก่อน หากปีล่าสุดขาดทุนให้กรอกปีก่อนหน้าต่อเนื่อง สูงสุด 3 ปี ระบบจะคำนวณเกณฑ์ให้อัตโนมัติ</p>
       {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
       <div className="financial-year-picker">
         <label><span>เลือกปีที่มีข้อมูลแล้ว</span><select value={existing ? year : ''} onChange={event => event.target.value && selectYear(event.target.value)}>
@@ -117,7 +117,7 @@ export default function FinancialEditorDialog({ customer, companyName, rows, dis
       <div className={`financial-preview ${preview.overall}`}>
         <strong>ผลคำนวณตัวอย่าง: {overallLabel(preview.overall)}</strong>
         <span>อัตราดอกเบี้ยต่อรายได้: {preview.interestRatio === null ? 'ข้อมูลไม่ครบ' : `${(preview.interestRatio * 100).toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`}</span>
-        <small>เกณฑ์ผ่านต้องต่ำกว่า 5% และต้องไม่ขาดทุนต่อเนื่องครบ 3 ปี</small>
+        <small>ภาระดอกเบี้ยต้องต่ำกว่า 5% และผลประกอบการต้องไม่ขาดทุนต่อเนื่องครบ 3 ปี</small>
       </div>
       <div className="modal-foot">
         <button className="button" type="button" onClick={onClose}>ยกเลิก</button>
