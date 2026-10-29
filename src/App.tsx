@@ -5,8 +5,9 @@ import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
 import CustomerImportDialog from './CustomerImportDialog';
 import FinancialEditorDialog from './FinancialEditorDialog';
-import FinancialScreeningCell, { FinancialHistory } from './FinancialScreeningCell';
+import FinancialScreeningCell, { FinancialHistory, LatestFinancialCell, RegistryScreeningCell } from './FinancialScreeningCell';
 import { assessFinancials, type OverallStatus } from './financial-screening';
+import { filterCustomerRegistryRows } from './customer-registry';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
@@ -175,22 +176,38 @@ export default function App() {
   const spec = specs.find(item => item.key === part)!;
   const customerSpec = specs.find(item => item.key === 'customers')!;
   const companyNameIndex = customerSpec.headers.indexOf('ชื่อบริษัท');
+  const phoneIndex = customerSpec.headers.indexOf('เบอร์โทรศัพท์');
   const registrationIndex = customerSpec.headers.indexOf('เลขทะเบียนนิติบุคคล (13 หลัก)');
   const registeredAtIndex = customerSpec.headers.indexOf('วันที่จดทะเบียน');
   const directorsIndex = customerSpec.headers.indexOf('รายชื่อกรรมการ');
   const companySearch =
     part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
+  const customerAssessments = useMemo(
+    () => new Map(data.customers.map(row => [row.id, assessFinancials(data.financials || [], row.id)])),
+    [data.customers, data.financials]
+  );
   const visibleRows = useMemo(
-    () =>
-      (data[part] || []).filter(row => {
+    () => {
+      if (part === 'customers') return filterCustomerRegistryRows(data.customers, query, financialFilter, customerAssessments);
+      return (data[part] || []).filter(row => {
         const matchesQuery = !query || row.values.some(v =>
           String(v ?? '').toLowerCase().includes(query.toLowerCase())
         );
-        if (!matchesQuery || part !== 'customers' || financialFilter === 'all') return matchesQuery;
-        return assessFinancials(data.financials || [], row.id).overall === financialFilter;
-      }),
-    [data, part, query, financialFilter]
+        return matchesQuery;
+      });
+    },
+    [data, part, query, financialFilter, customerAssessments]
   );
+  const customerSummary = useMemo(() => {
+    const summary = { total: 0, pass: 0, fail: 0, incomplete: 0 };
+    if (part !== 'customers') return summary;
+    for (const row of visibleRows) {
+      summary.total += 1;
+      const status = customerAssessments.get(row.id)?.overall || 'incomplete';
+      summary[status] += 1;
+    }
+    return summary;
+  }, [part, visibleRows, customerAssessments]);
   const today = localDate();
   const customerCount = data.customers.filter(
     row => row.values[19] !== 'เก็บถาวร'
@@ -231,6 +248,10 @@ export default function App() {
     setContactContext(context);
     setError('');
     setNotice('');
+  };
+  const openCompanyProfile = (customer: Row, showFinancials = false) => {
+    setFinancialProfileExpanded(showFinancials);
+    setSelectedCustomer(customer);
   };
   const beginAdd = () => {
     const initial = spec.headers.map((_, index) => {
@@ -572,7 +593,7 @@ export default function App() {
         <section className="section-heading">
           <div>
             <h2>{names[part]}</h2>
-            <small>{data[part]?.length || 0} รายการ</small>
+            <small>{part === 'customers' ? `${visibleRows.length} จาก ${data.customers.length} รายการ` : `${data[part]?.length || 0} รายการ`}</small>
           </div>
           <div className="actions">
             <button className="button" onClick={exportCsv}>
@@ -606,7 +627,14 @@ export default function App() {
             <option value="incomplete">ข้อมูลไม่พอประเมิน</option>
           </select></label>}
         </div>
+        {part === 'customers' && <p className="registry-result-count" aria-live="polite">แสดง {visibleRows.length} จาก {data.customers.length} รายการ</p>}
         {part === 'customers' && <p className="screening-disclaimer">ผลนี้เป็นเกณฑ์กรองข้อมูลการเงินเบื้องต้น ไม่ใช่ผลอนุมัติสินเชื่อและไม่ยืนยันสิทธิ์ในการติดต่อ ต้องตรวจข้อห้ามติดต่อและ Call Verify แยกต่างหาก</p>}
+        {part === 'customers' && <section className="customer-summary-grid" aria-label="สรุปเกณฑ์ก่อนติดต่อของรายการที่แสดง">
+          <div><span>ลูกค้าที่แสดง</span><strong>{customerSummary.total}</strong></div>
+          <div className="pass"><span>ผ่านเกณฑ์</span><strong>{customerSummary.pass}</strong></div>
+          <div className="fail"><span>ไม่ผ่านเกณฑ์</span><strong>{customerSummary.fail}</strong></div>
+          <div className="incomplete"><span>ข้อมูลไม่พอประเมิน</span><strong>{customerSummary.incomplete}</strong></div>
+        </section>}
         {error && (
           <div className="error-banner" role="alert">{error}<button onClick={() => setError('')}>ปิด</button></div>
         )}
@@ -802,51 +830,45 @@ export default function App() {
             </form>
           </div>
         )}
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                {columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}
-                {sheetStatus === 'connected' && <th>การดำเนินการ</th>}
-              </tr>
-            </thead>
+        <div className={`table-wrap ${part === 'customers' ? 'customer-registry-wrap' : ''}`}>
+          {part === 'customers' ? <table className="customer-registry-table">
+            <thead><tr><th>บริษัท</th><th>เบอร์โทรศัพท์</th><th>งบปีล่าสุด</th><th>เกณฑ์ก่อนติดต่อ</th><th>การดำเนินการ</th></tr></thead>
             <tbody>
-              {visibleRows.map(row => (
-                <tr key={row.id}>
-                  {columns[part].map(index => (
-                    <td key={index}>
-                      {part === 'customers' && index === companyNameIndex ? (
-                        <div className="company-registry-cell">
-                          <button
-                          type="button"
-                          className="company-name-button"
-                          onClick={() => {
-                            setFinancialProfileExpanded(false);
-                            setSelectedCustomer(row);
-                          }}
-                          aria-haspopup="dialog"
-                          aria-label={`เปิดข้อมูลบริษัท ${String(row.values[companyNameIndex] || 'ไม่ระบุชื่อบริษัท')}`}
-                        >
-                          {displayValue(part, index, row.values[index], data)}
-                          </button>
-                        </div>
-                      ) : (
-                        displayValue(part, index, row.values[index], data)
-                      )}
-                    </td>
-                  ))}
-                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
-                </tr>
-              ))}
-              {!visibleRows.length && (
-                <tr>
-                  <td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
-                    {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
+              {visibleRows.map(row => {
+                const assessment = customerAssessments.get(row.id)!;
+                const companyName = String(row.values[companyNameIndex] || 'ไม่ระบุชื่อบริษัท');
+                const registration = row.values[registrationIndex];
+                const writeDisabled = loading || sheetStatus !== 'connected';
+                return <tr key={row.id}>
+                  <td data-label="บริษัท">
+                    <div className="company-registry-cell">
+                      <button type="button" className="company-name-button" onClick={() => openCompanyProfile(row)} aria-haspopup="dialog" aria-label={`เปิดข้อมูลบริษัท ${companyName}`}>{companyName}</button>
+                      {!isBlank(registration) && <small>เลขทะเบียน {String(registration)}</small>}
+                    </div>
                   </td>
-                </tr>
-              )}
+                  <td data-label="เบอร์โทรศัพท์" className={isBlank(row.values[phoneIndex]) ? 'muted-financial' : ''}>{isBlank(row.values[phoneIndex]) ? 'ไม่มีเบอร์โทร' : String(row.values[phoneIndex])}</td>
+                  <td data-label="งบปีล่าสุด" className="latest-financial-cell"><LatestFinancialCell customerId={row.id} rows={data.financials || []} /></td>
+                  <td data-label="เกณฑ์ก่อนติดต่อ" className="financial-screening-cell"><RegistryScreeningCell customerId={row.id} rows={data.financials || []} /></td>
+                  <td data-label="การดำเนินการ" className="row-actions registry-row-actions">
+                    {assessment.overall === 'pass' && <button className="button primary" type="button" disabled={writeDisabled} onClick={() => beginContact({ customerId: row.id })} aria-label={`เริ่มติดต่อ ${companyName}`}>เริ่มติดต่อ</button>}
+                    {assessment.overall === 'incomplete' && <button className="button primary" type="button" disabled={writeDisabled} onClick={() => setFinancialCustomer(row)} aria-label={`เพิ่มหรือแก้ไขงบ ${companyName}`}>เพิ่ม/แก้ไขงบ</button>}
+                    {assessment.overall === 'fail' && <><span className="registry-action-advice">ไม่แนะนำให้ติดต่อ</span><button className="button" type="button" onClick={() => openCompanyProfile(row, true)} aria-label={`ดูรายละเอียดเกณฑ์ ${companyName}`}>ดูรายละเอียด</button></>}
+                    <button className="button ghost" type="button" disabled={writeDisabled} onClick={() => beginEdit(row)} aria-label={`แก้ไขทะเบียน ${companyName}`}>แก้ไขทะเบียน</button>
+                  </td>
+                </tr>;
+              })}
+              {!visibleRows.length && <tr><td colSpan={5} className="empty">{loading ? 'กำลังโหลด…' : query || financialFilter !== 'all' ? 'ไม่พบลูกค้าที่ตรงกับการค้นหาและตัวกรอง' : 'ยังไม่มีรายชื่อลูกค้า'}</td></tr>}
             </tbody>
-          </table>
+          </table> : <table>
+            <thead><tr>{columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}{sheetStatus === 'connected' && <th>การดำเนินการ</th>}</tr></thead>
+            <tbody>
+              {visibleRows.map(row => <tr key={row.id}>
+                {columns[part].map(index => <td key={index}>{displayValue(part, index, row.values[index], data)}</td>)}
+                {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
+              </tr>)}
+              {!visibleRows.length && <tr><td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">{loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}</td></tr>}
+            </tbody>
+          </table>}
         </div>
       </main>
 

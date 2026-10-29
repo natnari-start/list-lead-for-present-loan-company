@@ -10,12 +10,24 @@ const mark = (status: 'pass' | 'fail' | 'unknown') => status === 'pass' ? '✓' 
 
 export function LatestFinancialCell({ customerId, rows }: Props) {
   const latest = assessFinancials(rows, customerId).periods[0];
-  if (!latest) return <span className="muted-financial">ยังไม่มีข้อมูล</span>;
-  return <div className="latest-financial">
+  if (!latest) return <span className="muted-financial">ยังไม่มีข้อมูลงบ</span>;
+  const profitClass = latest.netProfit === null ? 'unknown' : latest.netProfit < 0 ? 'negative' : 'positive';
+  return <div className="latest-financial registry-latest-financial">
     <strong>ปี {latest.year}{latest.duplicate ? ' · พบรายการซ้ำ' : ''}</strong>
-    <span>กำไร (ขาดทุน) สุทธิ: {amount(latest.netProfit)} บาท</span>
-    <span>รายได้รวม: {amount(latest.revenue)} บาท</span>
-    <span>ดอกเบี้ยจ่าย: {amount(latest.interestExpense)} บาท</span>
+    <span className={`registry-net-profit ${profitClass}`}>กำไร (ขาดทุน) สุทธิ: {amount(latest.netProfit)} บาท</span>
+  </div>;
+}
+
+export function RegistryScreeningCell({ customerId, rows }: Props) {
+  const result = assessFinancials(rows, customerId);
+  const summary = result.overall === 'pass' ? 'ผ่านเกณฑ์' : result.overall === 'fail' ? 'ไม่ผ่านเกณฑ์' : 'ข้อมูลไม่พอ';
+  const ratio = result.interestRatio === null
+    ? 'ข้อมูลรายได้หรือดอกเบี้ยไม่ครบ'
+    : `ดอกเบี้ยต่อรายได้ ${(result.interestRatio * 100).toLocaleString('th-TH', { maximumFractionDigits: 2 })}%`;
+  return <div className="registry-screening" aria-label={`เกณฑ์ก่อนติดต่อ: ${summary}`}>
+    <span className={`screening-summary ${result.overall}`}>{summary}</span>
+    <small><b aria-hidden="true">{mark(result.profitability)}</b> ผลประกอบการ: {criterionLabel(result.profitability)} · {result.profitabilityReason}</small>
+    <small><b aria-hidden="true">{mark(result.interestBurden)}</b> ภาระดอกเบี้ย: {criterionLabel(result.interestBurden)} · {ratio}</small>
   </div>;
 }
 
