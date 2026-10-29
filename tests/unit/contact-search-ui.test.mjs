@@ -38,6 +38,7 @@ globalThis.__contactUi = {
 const bundle = await build({
   entryPoints: [new URL('../../src/App.tsx', import.meta.url).pathname],
   bundle: true, write: false, format: 'esm', platform: 'node', jsx: 'automatic',
+  loader: { '.css': 'empty' },
   plugins: [{ name: 'ui-fixture', setup(builder) {
     builder.onResolve({ filter: /^@appdeploy\/client$/ }, () => ({ path: 'client', namespace: 'test' }));
     builder.onLoad({ filter: /.*/, namespace: 'test' }, () => ({ contents: 'export const api = globalThis.__contactUi.api; export const auth = globalThis.__contactUi.auth;' }));

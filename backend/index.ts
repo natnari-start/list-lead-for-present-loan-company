@@ -9,6 +9,7 @@ import {
 import { schemas } from '../src/schema';
 import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-search-status';
 import { contactIndexes, validateContactValues } from '../src/contact-log';
+import { financialSchema } from '../src/financial-screening';
 import { createHash } from 'node:crypto';
 import { createGoogleSheetsContact, createGoogleSheetsCustomer, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
@@ -20,9 +21,10 @@ type SheetSpec = {
   numbers?: number[];
   required?: number[];
   options?: Record<string, string[]>;
+  optional?: boolean;
 };
 
-const SPECS = schemas as unknown as SheetSpec[];
+const SPECS = [...schemas, financialSchema] as unknown as SheetSpec[];
 const adminAllowlist: RouterMiddleware = async (ctx) => {
   let allowedEmails: string[];
   try {
@@ -193,6 +195,7 @@ export const handler = router({
     async ({ body, params }) => {
       const spec = SPECS.find(item => item.key === params.part);
       if (!spec) return error('ไม่พบประเภทข้อมูลที่ต้องการแก้ไข', 404);
+      if (spec.key === 'financials') return error('ข้อมูลงบการเงินรายปีเป็นโหมดอ่านอย่างเดียวใน WebApp', 405);
       const payload = body as { values?: unknown; expectedValues?: unknown } | null;
       if (!payload || !Array.isArray(payload.values) || !Array.isArray(payload.expectedValues) ||
         payload.values.length !== spec.headers.length || payload.expectedValues.length !== spec.headers.length) {

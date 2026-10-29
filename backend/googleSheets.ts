@@ -10,6 +10,7 @@ type SheetSpec = {
   numbers?: number[];
   required?: number[];
   options?: Record<string, string[]>;
+  optional?: boolean;
 };
 
 type ServiceAccount = {
@@ -378,7 +379,7 @@ export async function inspectGoogleSheets(
   );
   const checkedSheets = await Promise.all(specs.map(async spec => {
     if (!availableNames.has(spec.sheetName)) {
-      return { name: spec.sheetName, headerCount: 0, headersMatch: false };
+      return { name: spec.sheetName, headerCount: 0, headersMatch: !!spec.optional };
     }
     const actual = await readHeader(spec);
     return {
@@ -403,6 +404,10 @@ export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetDat
   const data: SheetData = {};
   for (const spec of specs) {
     const sheet = sheets.get(spec.sheetName);
+    if (!sheet && spec.optional) {
+      data[spec.key] = [];
+      continue;
+    }
     if (!sheet) throw new Error('Required Google Sheet tab is missing');
     const header = await readHeader(spec);
     if (!headersMatch(header, spec.headers)) {

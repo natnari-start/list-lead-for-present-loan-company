@@ -4,6 +4,8 @@ import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
 import CustomerImportDialog from './CustomerImportDialog';
+import FinancialScreeningCell from './FinancialScreeningCell';
+import { assessFinancials, type OverallStatus } from './financial-screening';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
@@ -13,7 +15,7 @@ import {
 
 type Part = 'customers' | 'cases' | 'contacts' | 'tasks' | 'documents';
 type Row = { id: string; values: unknown[] };
-type Data = Record<Part, Row[]>;
+type Data = Record<Part, Row[]> & { financials?: Row[] };
 type Spec = {
   key: Part;
   sheetName: string;
@@ -47,6 +49,7 @@ const blankData = (): Data => ({
   contacts: [],
   tasks: [],
   documents: [],
+  financials: [],
 });
 const isBlank = (value: unknown) =>
   value === null || value === undefined || String(value).trim() === '';
@@ -77,6 +80,7 @@ export default function App() {
   const [part, setPart] = useState<Part>('customers');
   const [data, setData] = useState<Data>(blankData());
   const [query, setQuery] = useState('');
+  const [financialFilter, setFinancialFilter] = useState<'all' | OverallStatus>('all');
   const [record, setRecord] = useState<Row | null>(null);
   const [contactContext, setContactContext] = useState<{ customerId?: string; caseId?: string } | null>(null);
   const [customerImportOpen, setCustomerImportOpen] = useState(false);
@@ -168,16 +172,14 @@ export default function App() {
     part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
   const visibleRows = useMemo(
     () =>
-      (data[part] || []).filter(
-        row =>
-          !query ||
-          row.values.some(v =>
-            String(v ?? '')
-              .toLowerCase()
-              .includes(query.toLowerCase())
-          )
-      ),
-    [data, part, query]
+      (data[part] || []).filter(row => {
+        const matchesQuery = !query || row.values.some(v =>
+          String(v ?? '').toLowerCase().includes(query.toLowerCase())
+        );
+        if (!matchesQuery || part !== 'customers' || financialFilter === 'all') return matchesQuery;
+        return assessFinancials(data.financials || [], row.id).overall === financialFilter;
+      }),
+    [data, part, query, financialFilter]
   );
   const today = localDate();
   const customerCount = data.customers.filter(
@@ -586,6 +588,7 @@ export default function App() {
               onClick={() => {
                 setPart(key);
                 setQuery('');
+                setFinancialFilter('all');
                 setRecord(null);
                 setContactContext(null);
                 setCustomerImportOpen(false);
@@ -618,12 +621,21 @@ export default function App() {
             ) : <small className="small-note">เพิ่มประวัติการติดต่อได้จากแท็บประวัติการติดต่อ</small>}
           </div>
         </section>
-        <input
-          className="search"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder={`ค้นหา${names[part]}`}
-        />
+        <div className="registry-filters">
+          <input
+            className="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={`ค้นหา${names[part]}`}
+          />
+          {part === 'customers' && <label className="financial-filter"><span>เกณฑ์ก่อนติดต่อ</span><select value={financialFilter} onChange={event => setFinancialFilter(event.target.value as typeof financialFilter)}>
+            <option value="all">ทั้งหมด</option>
+            <option value="pass">ผ่านเกณฑ์กรองเบื้องต้น</option>
+            <option value="fail">ไม่เข้าเกณฑ์กรองเบื้องต้น</option>
+            <option value="incomplete">ข้อมูลไม่พอประเมิน</option>
+          </select></label>}
+        </div>
+        {part === 'customers' && <p className="screening-disclaimer">ผลนี้เป็นเกณฑ์กรองข้อมูลการเงินเบื้องต้น ไม่ใช่ผลอนุมัติสินเชื่อและไม่ยืนยันสิทธิ์ในการติดต่อ ต้องตรวจข้อห้ามติดต่อและ Call Verify แยกต่างหาก</p>}
         {error && (
           <div className="error-banner" role="alert">{error}<button onClick={() => setError('')}>ปิด</button></div>
         )}
@@ -762,6 +774,7 @@ export default function App() {
             <thead>
               <tr>
                 {columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}
+                {part === 'customers' && <th>เกณฑ์ก่อนติดต่อ</th>}
                 {sheetStatus === 'connected' && <th>การดำเนินการ</th>}
               </tr>
             </thead>
@@ -809,12 +822,13 @@ export default function App() {
                       )}
                     </td>
                   ))}
+                  {part === 'customers' && <td className="financial-screening-cell"><FinancialScreeningCell customerId={row.id} rows={data.financials || []} /></td>}
                   {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
                 </tr>
               ))}
               {!visibleRows.length && (
                 <tr>
-                  <td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
+                  <td colSpan={columns[part].length + (part === 'customers' ? 1 : 0) + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
                     {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
                   </td>
                 </tr>

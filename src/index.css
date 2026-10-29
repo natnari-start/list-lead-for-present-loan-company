@@ -279,6 +279,34 @@ p {
   border-radius: 8px;
   background: #fff;
 }
+.registry-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.registry-filters .search { margin: 0; }
+.financial-filter { display: grid; gap: 5px; color: #53657a; font-size: 12px; }
+.financial-filter select { min-width: 230px; padding: 10px 12px; border: 1px solid #d9e1ea; border-radius: 8px; background: #fff; }
+.screening-disclaimer { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid #7b8796; background: #f8fafc; color: #53657a; font-size: 12px; line-height: 1.6; }
+.financial-screening-cell { min-width: 270px; }
+.financial-screening { display: grid; gap: 8px; }
+.screening-summary { width: fit-content; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.screening-summary.pass { background: #eaf7ee; color: #176b35; }
+.screening-summary.fail { background: #fff0ee; color: #a12b1f; }
+.screening-summary.incomplete { background: #fff5df; color: #76500e; }
+.screening-criterion { display: grid; grid-template-columns: 18px 1fr; column-gap: 6px; align-items: start; }
+.screening-criterion b { grid-row: 1 / 3; }
+.screening-criterion span { font-weight: 600; }
+.screening-criterion small { color: #68778a; line-height: 1.45; }
+.screening-criterion.pass b { color: #176b35; }
+.screening-criterion.fail b { color: #a12b1f; }
+.screening-criterion.unknown b { color: #9a6700; }
+.screening-reason { color: #76500e; line-height: 1.45; }
+.screening-details summary { color: #185d98; cursor: pointer; font-weight: 600; }
+.screening-periods { display: grid; gap: 7px; margin-top: 8px; }
+.screening-periods > div { display: grid; gap: 2px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fbfcfe; }
+.screening-periods span, .screening-periods small { color: #53657a; font-size: 11px; }
 .table-wrap {
   overflow: auto;
   border: 1px solid #e2e8f0;
@@ -602,6 +630,8 @@ td {
     flex-direction: column;
     gap: 12px;
   }
+  .registry-filters { align-items: stretch; flex-direction: column; }
+  .financial-filter select { width: 100%; min-width: 0; }
   .actions {
     flex-wrap: wrap;
   }
