@@ -384,6 +384,7 @@ td {
 }
 .details-modal {
   width: min(1000px, 100%);
+  max-height: 90dvh;
 }
 .company-registry-cell {
   display: flex;
@@ -428,6 +429,7 @@ td {
 .details-modal .modal-head {
   align-items: flex-start;
   gap: 16px;
+  flex: 0 0 auto;
 }
 .details-heading {
   min-width: 0;
@@ -439,18 +441,25 @@ td {
   margin: 8px 0 0;
 }
 .details-note {
-  padding: 0 22px;
+  padding: 16px 22px 0;
   margin: 0;
+}
+.company-profile-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .details-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  overflow: auto;
   padding: 16px 22px 22px;
 }
 .company-profile-grid .detail-field.wide { grid-column: 1 / -1; }
-.company-financial-section { margin: 0 22px 20px; padding: 16px; border: 1px solid #dce4ed; border-radius: 12px; background: #f8fafc; }
+.company-financial-section { margin: 0 22px 20px; }
+.financial-profile-toggle { display: flex; width: 100%; min-height: 44px; align-items: center; justify-content: center; border-color: #b9c9da; background: #f8fafc; color: #185d98; font-weight: 700; }
+.financial-profile-toggle:focus-visible { outline: 3px solid #91b9df; outline-offset: 2px; }
+.financial-profile-panel { margin-top: 10px; padding: 16px; border: 1px solid #dce4ed; border-radius: 12px; background: #f8fafc; }
 .company-financial-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .company-financial-heading h3 { margin: 2px 0 0; }
 .company-financial-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); gap: 14px; }
@@ -460,6 +469,7 @@ td {
 .profile-financial-history span { color: #53657a; font-size: 12px; }
 .financial-usage-note { margin-top: 14px; padding: 11px 13px; border-left: 3px solid #2365a8; background: #fff; color: #53657a; font-size: 12px; line-height: 1.6; }
 .financial-usage-note ol { margin: 6px 0 0; padding-left: 20px; }
+.details-modal .modal-foot { flex: 0 0 auto; }
 .detail-field {
   min-width: 0;
   padding: 12px;
@@ -672,6 +682,8 @@ td {
     grid-template-columns: 1fr;
     padding: 14px 16px;
   }
+  .company-financial-section { margin: 0 16px 16px; }
+  .financial-profile-panel { padding: 12px; }
   .company-financial-layout { grid-template-columns: 1fr; }
   .company-financial-heading { align-items: stretch; flex-direction: column; }
   .details-note {
