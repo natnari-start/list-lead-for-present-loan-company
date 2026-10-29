@@ -699,3 +699,89 @@ export async function updateGoogleSheetsRecord(
     data: updates,
   });
 }
+
+export async function deleteGoogleSheetsRecords(
+  specs: SheetSpec[],
+  targets: Array<{ key: string; ids: string[] }>
+): Promise<void> {
+  const requested = targets
+    .map(target => ({
+      key: target.key,
+      ids: [...new Set(target.ids.map(id => String(id).trim()).filter(Boolean))],
+    }))
+    .filter(target => target.ids.length > 0);
+  if (!requested.length) return;
+
+  const metadata = await getMetadata();
+  const requests: Array<{
+    deleteDimension: {
+      range: { sheetId: number; dimension: 'ROWS'; startIndex: number; endIndex: number };
+    };
+  }> = [];
+
+  for (const target of requested) {
+    const spec = specs.find(item => item.key === target.key);
+    if (!spec) throw new Error('ไม่พบประเภทข้อมูลที่ต้องการลบ');
+    const sheet = (metadata.sheets || []).find(item => item.properties?.title === spec.sheetName);
+    const sheetId = sheet?.properties?.sheetId;
+    if (!sheet || sheetId === undefined) throw new Error('ไม่พบแท็บ Google Sheets ที่ต้องการลบข้อมูล');
+    if (!headersMatch(await readHeader(spec), spec.headers)) {
+      throw new GoogleSheetsConflictError('หัวตารางถูกเปลี่ยน กรุณาตรวจโครงสร้างชีตก่อนลบ');
+    }
+
+    const rowCount = sheet.properties?.gridProperties?.rowCount || 1;
+    const sheetRange = "'" + spec.sheetName.replace(/'/g, "''") + "'";
+    const idValues = rowCount > 1
+      ? await googleGet<ValuesResponse>(await valuesUrl(sheetRange + '!A2:A' + rowCount))
+      : { values: [] };
+    const rowsById = new Map<string, number[]>();
+    for (const [index, row] of (idValues.values || []).entries()) {
+      const id = String(row[0] ?? '');
+      if (!id) continue;
+      rowsById.set(id, [...(rowsById.get(id) || []), index + 2]);
+    }
+
+    const rowNumbers = target.ids.map(id => {
+      const matches = rowsById.get(id) || [];
+      if (!matches.length) throw new GoogleSheetsConflictError('ไม่พบรายการที่ต้องการลบแล้ว กรุณารีเฟรช');
+      if (matches.length > 1) throw new GoogleSheetsConflictError('พบรหัสรายการซ้ำใน Google Sheets จึงหยุดการลบ');
+      return matches[0];
+    }).sort((a, b) => b - a);
+
+    for (const rowNumber of rowNumbers) {
+      requests.push({
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: rowNumber - 1,
+            endIndex: rowNumber,
+          },
+        },
+      });
+    }
+  }
+
+  const token = await createAccessToken();
+  let response: Response;
+  try {
+    response = await fetch(
+      'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(await getSpreadsheetId()) + ':batchUpdate',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests }),
+      }
+    );
+  } catch {
+    throw new GoogleSheetsFailure('upstream_error', undefined, 'network_error', 'write_api');
+  }
+  if (!response.ok) {
+    let reason = '';
+    try {
+      const body = await response.json() as { error?: { status?: string; errors?: Array<{ reason?: string }> } };
+      reason = body.error?.errors?.[0]?.reason || body.error?.status || '';
+    } catch {}
+    throw new GoogleSheetsFailure(classifyGoogleFailure(response.status, reason), response.status, reason, 'write_api');
+  }
+}

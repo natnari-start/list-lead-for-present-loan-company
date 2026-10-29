@@ -87,6 +87,9 @@ export default function App() {
   const [customerImportOpen, setCustomerImportOpen] = useState(false);
   const [financialCustomer, setFinancialCustomer] = useState<Row | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deletingCustomerId, setDeletingCustomerId] = useState('');
   const [financialProfileExpanded, setFinancialProfileExpanded] = useState(false);
   const [values, setValues] = useState<unknown[]>([]);
   const [error, setError] = useState('');
@@ -98,13 +101,18 @@ export default function App() {
   const [sheetMessage, setSheetMessage] = useState('');
 
   useEffect(() => {
-    if (!selectedCustomer) return;
+    if (!selectedCustomer && !deleteTarget) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setSelectedCustomer(null);
-        setFinancialProfileExpanded(false);
+        if (deleteTarget && !deletingCustomerId) {
+          setDeleteTarget(null);
+          setDeleteConfirmation('');
+        } else if (selectedCustomer) {
+          setSelectedCustomer(null);
+          setFinancialProfileExpanded(false);
+        }
       }
     };
     window.addEventListener('keydown', closeOnEscape);
@@ -112,7 +120,7 @@ export default function App() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [selectedCustomer]);
+  }, [selectedCustomer, deleteTarget, deletingCustomerId]);
 
   const load = async () => {
     setLoading(true);
@@ -252,6 +260,14 @@ export default function App() {
   const openCompanyProfile = (customer: Row, showFinancials = false) => {
     setFinancialProfileExpanded(showFinancials);
     setSelectedCustomer(customer);
+  };
+  const openDeleteCompany = (customer: Row) => {
+    setSelectedCustomer(null);
+    setFinancialProfileExpanded(false);
+    setDeleteConfirmation('');
+    setDeleteTarget(customer);
+    setError('');
+    setNotice('');
   };
   const beginAdd = () => {
     const initial = spec.headers.map((_, index) => {
@@ -458,6 +474,31 @@ export default function App() {
       setData(response.data.data as Data);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'ลบไม่สำเร็จ');
+    }
+  }
+
+  async function deleteCompany() {
+    if (!deleteTarget) return;
+    const companyName = String(deleteTarget.values[companyNameIndex] || deleteTarget.id);
+    if (deleteConfirmation.trim() !== companyName) {
+      setError('กรุณาพิมพ์ชื่อบริษัทให้ตรงก่อนยืนยันลบ');
+      return;
+    }
+    setDeletingCustomerId(deleteTarget.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await api.delete(`/api/records/customers/${encodeURIComponent(deleteTarget.id)}`);
+      const result = response.data as { data: Data; deletedFinancials?: number };
+      setData(result.data);
+      setDeleteTarget(null);
+      setDeleteConfirmation('');
+      setNotice(`ลบบริษัท ${companyName} และข้อมูลงบที่เชื่อมโยง ${result.deletedFinancials || 0} รายการแล้ว`);
+    } catch (cause) {
+      const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(responseMessage || (cause instanceof Error ? cause.message : 'ลบบริษัทไม่สำเร็จ'));
+    } finally {
+      setDeletingCustomerId('');
     }
   }
 
@@ -790,6 +831,46 @@ export default function App() {
             </section>
           </div>
         )}
+        {deleteTarget && (() => {
+          const companyName = String(deleteTarget.values[companyNameIndex] || deleteTarget.id);
+          const linked = {
+            cases: data.cases.filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+            contacts: data.contacts.filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+            tasks: data.tasks.filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+            financials: (data.financials || []).filter(row => String(row.values[1] ?? '') === deleteTarget.id).length,
+          };
+          const hasLinkedOperations = linked.cases + linked.contacts + linked.tasks > 0;
+          const deleting = deletingCustomerId === deleteTarget.id;
+          return <div className="modal-backdrop delete-company-backdrop">
+            <section className="modal delete-company-modal" role="dialog" aria-modal="true" aria-labelledby="delete-company-title">
+              <div className="modal-head">
+                <div>
+                  <small>ลบข้อมูลบริษัท</small>
+                  <h2 id="delete-company-title">{companyName}</h2>
+                </div>
+                <button className="button" type="button" disabled={deleting} onClick={() => { setDeleteTarget(null); setDeleteConfirmation(''); }} aria-label={`ปิดหน้าต่างลบบริษัท ${companyName}`}>ปิด</button>
+              </div>
+              <div className="delete-company-content">
+                {hasLinkedOperations ? <div className="delete-blocked-message" role="alert">
+                  <strong>ยังลบบริษัทนี้ไม่ได้</strong>
+                  <p>พบข้อมูลเชื่อมโยง: เคส {linked.cases} รายการ, ประวัติติดต่อ {linked.contacts} รายการ และงานติดตาม {linked.tasks} รายการ</p>
+                  <p>เพื่อไม่ให้ประวัติงานสูญหาย กรุณาแก้ไขทะเบียนและเปลี่ยนสถานะเป็น “เก็บถาวร” แทน</p>
+                </div> : <>
+                  <p className="delete-warning"><strong>การลบนี้กู้คืนไม่ได้</strong> บริษัทจะถูกลบออกจาก Google Sheets และข้อมูลงบที่เชื่อมโยง {linked.financials} รายการจะถูกลบพร้อมกัน</p>
+                  <label className="delete-confirmation-field">
+                    <span>พิมพ์ชื่อบริษัท <strong>{companyName}</strong> เพื่อยืนยัน</span>
+                    <input name="delete-company-confirmation" autoComplete="off" value={deleteConfirmation} disabled={deleting} onInput={event => setDeleteConfirmation(event.currentTarget.value)} />
+                  </label>
+                </>}
+                {error && <div className="error-banner" role="alert">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
+              </div>
+              <div className="modal-foot">
+                <button className="button" type="button" disabled={deleting} onClick={() => { setDeleteTarget(null); setDeleteConfirmation(''); }}>ยกเลิก</button>
+                {!hasLinkedOperations && <button className="button danger" type="button" disabled={deleting || deleteConfirmation.trim() !== companyName} onClick={() => void deleteCompany()} aria-label={`ยืนยันลบบริษัท ${companyName}`}>{deleting ? 'กำลังลบ…' : 'ลบบริษัทถาวร'}</button>}
+              </div>
+            </section>
+          </div>;
+        })()}
         {record && (
           <div className="modal-backdrop">
             <form className="modal edit-modal" onSubmit={save}>
@@ -854,6 +935,7 @@ export default function App() {
                     {assessment.overall === 'incomplete' && <button className="button primary" type="button" disabled={writeDisabled} onClick={() => setFinancialCustomer(row)} aria-label={`เพิ่มหรือแก้ไขงบ ${companyName}`}>เพิ่ม/แก้ไขงบ</button>}
                     {assessment.overall === 'fail' && <><span className="registry-action-advice">ไม่แนะนำให้ติดต่อ</span><button className="button" type="button" onClick={() => openCompanyProfile(row, true)} aria-label={`ดูรายละเอียดเกณฑ์ ${companyName}`}>ดูรายละเอียด</button></>}
                     <button className="button ghost" type="button" disabled={writeDisabled} onClick={() => beginEdit(row)} aria-label={`แก้ไขทะเบียน ${companyName}`}>แก้ไขทะเบียน</button>
+                    <button className="button danger ghost" type="button" disabled={writeDisabled || deletingCustomerId === row.id} onClick={() => openDeleteCompany(row)} aria-label={`ลบบริษัท ${companyName}`}>ลบบริษัท</button>
                   </td>
                 </tr>;
               })}

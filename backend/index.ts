@@ -11,7 +11,7 @@ import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-sear
 import { contactIndexes, validateContactValues } from '../src/contact-log';
 import { financialSchema, validateFinancialEntry } from '../src/financial-screening';
 import { createHash } from 'node:crypto';
-import { createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
+import { createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, deleteGoogleSheetsRecords, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
   key: string;
@@ -338,6 +338,48 @@ export const handler = router({
   ],
   'DELETE /api/records/:part/:id': [
     ...auth,
-    async () => error('รุ่นนี้เปิด Google Sheets แบบอ่านอย่างเดียว', 405),
+    async ({ params }) => {
+      if (params.part !== 'customers') return error('รองรับการลบเฉพาะทะเบียนลูกค้า', 405);
+      const id = String(params.id || '').trim();
+      if (!id) return error('ไม่พบรหัสลูกค้าที่ต้องการลบ', 400);
+      try {
+        const current = await loadGoogleSheetsData(SPECS);
+        const matches = current.customers.filter(row => row.id === id);
+        if (matches.length > 1) return error('พบรหัสลูกค้าซ้ำ จึงหยุดการลบเพื่อป้องกันข้อมูลผิดรายการ', 409);
+        if (!matches.length) return json({ data: current, deleted: false, replayed: true, deletedFinancials: 0 });
+
+        const linked = {
+          cases: current.cases.filter(row => String(row.values[1] ?? '') === id).length,
+          contacts: current.contacts.filter(row => String(row.values[1] ?? '') === id).length,
+          tasks: current.tasks.filter(row => String(row.values[1] ?? '') === id).length,
+        };
+        const linkedTotal = linked.cases + linked.contacts + linked.tasks;
+        if (linkedTotal > 0) {
+          return error(
+            `ลบบริษัทไม่ได้ เพราะมีข้อมูลเชื่อมโยง: เคส ${linked.cases}, ประวัติติดต่อ ${linked.contacts}, งานติดตาม ${linked.tasks} กรุณาเก็บถาวรแทน`,
+            409
+          );
+        }
+
+        const financialIds = (current.financials || [])
+          .filter(row => String(row.values[1] ?? '') === id)
+          .map(row => row.id);
+        await deleteGoogleSheetsRecords(SPECS, [
+          { key: 'financials', ids: financialIds },
+          { key: 'customers', ids: [id] },
+        ]);
+        return json({
+          data: await loadGoogleSheetsData(SPECS),
+          deleted: true,
+          replayed: false,
+          deletedFinancials: financialIds.length,
+        });
+      } catch (cause) {
+        if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
+        const failure = describeGoogleSheetsFailure(cause);
+        console.warn('google_sheets_delete_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
+        return error('ลบบริษัทไม่สำเร็จ: ' + failure.message, failure.status === 403 ? 403 : 502);
+      }
+    },
   ],
 });

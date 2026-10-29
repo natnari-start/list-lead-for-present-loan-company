@@ -47,7 +47,7 @@ const state = {
     ],
     cases: [], contacts: [], tasks: [], documents: [],
   },
-  calls: [], fault: null, gate: null, connected: true,
+  calls: [], deleteCalls: [], fault: null, gate: null, connected: true,
 };
 globalThis.__contactUi = {
   auth: { getUser: async () => ({ email: 'admin@example.invalid' }), signOut: async () => {} },
@@ -64,6 +64,14 @@ globalThis.__contactUi = {
       }
       row.values = [...payload.values];
       return { data: { data: structuredClone(state.data), updated: true } };
+    },
+    delete: async path => {
+      state.deleteCalls.push(path);
+      const id = decodeURIComponent(path.split('/').at(-1));
+      const deletedFinancials = state.data.financials.filter(item => item.values[financialIndexes['รหัสลูกค้า']] === id).length;
+      state.data.customers = state.data.customers.filter(item => item.id !== id);
+      state.data.financials = state.data.financials.filter(item => item.values[financialIndexes['รหัสลูกค้า']] !== id);
+      return { data: { data: structuredClone(state.data), deleted: true, deletedFinancials } };
     },
   },
 };
@@ -92,6 +100,7 @@ describe('customer registry essentials', () => {
     let root = createRoot(document.getElementById('root'));
     const click = async node => { assert.ok(node); await act(async () => node.click()); };
     const change = async (node, value) => { assert.ok(node); await act(async () => { node.value = value; node.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); };
+    const input = async (node, value) => { assert.ok(node); await act(async () => { const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set; setter.call(node, value); node.dispatchEvent(new dom.window.Event('input', { bubbles: true })); node.dispatchEvent(new dom.window.Event('change', { bubbles: true })); }); };
     const mount = async () => { await act(async () => root.render(createElement(App))); };
     try {
       dom.window.confirm = () => true;
@@ -157,6 +166,22 @@ describe('customer registry essentials', () => {
       await act(async () => window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
       assert.equal(document.querySelector('[role="dialog"]'), null);
       assert.equal(document.body.style.overflow, '');
+      const deleteButton = document.querySelector('[aria-label="ลบบริษัท บริษัท ผ่านเกณฑ์ จำกัด"]');
+      await click(deleteButton);
+      const deleteDialog = document.querySelector('[role="dialog"]');
+      assert.ok(deleteDialog.textContent.includes('การลบนี้กู้คืนไม่ได้'));
+      assert.ok(deleteDialog.textContent.includes('ข้อมูลงบที่เชื่อมโยง 1 รายการ'));
+      const confirmDelete = deleteDialog.querySelector('[aria-label="ยืนยันลบบริษัท บริษัท ผ่านเกณฑ์ จำกัด"]');
+      assert.equal(confirmDelete.disabled, true);
+      const confirmationInput = deleteDialog.querySelector('[name="delete-company-confirmation"]');
+      await input(confirmationInput, 'บริษัท ผ่านเกณฑ์ จำกัด');
+      const enabledDelete = deleteDialog.querySelector('[aria-label="ยืนยันลบบริษัท บริษัท ผ่านเกณฑ์ จำกัด"]');
+      assert.equal(enabledDelete.disabled, false);
+      await click(enabledDelete);
+      assert.deepEqual(state.deleteCalls, ['/api/records/customers/SYN-UI-001']);
+      assert.equal(document.querySelector('[aria-label="เปิดข้อมูลบริษัท บริษัท ผ่านเกณฑ์ จำกัด"]'), null);
+      assert.ok(document.body.textContent.includes('ลบบริษัท บริษัท ผ่านเกณฑ์ จำกัด และข้อมูลงบที่เชื่อมโยง 1 รายการแล้ว'));
+      assert.deepEqual([...document.querySelectorAll('.customer-summary-grid strong')].map(node => node.textContent), ['2', '0', '1', '1']);
     } finally {
       await act(async () => root.unmount());
       dom.window.close();
