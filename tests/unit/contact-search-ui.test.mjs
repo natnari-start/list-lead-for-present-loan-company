@@ -76,8 +76,12 @@ describe('customer registry essentials', () => {
       assert.equal(state.calls[0].payload.values[flag], 'TRUE');
       assert.equal(state.data.customers[0].values[23], 'Original synthetic note');
       await click(document.querySelector('.company-name-button'));
-      assert.ok(document.querySelector('[role="dialog"]').textContent.includes(CONTACT_SEARCH_HEADER));
-      assert.ok(document.querySelector('[role="dialog"]').textContent.includes(CONTACT_SEARCH_LABEL));
+      const profile = document.querySelector('[role="dialog"]');
+      assert.ok(profile.textContent.includes('เลขทะเบียนนิติบุคคล (13 หลัก)'));
+      assert.ok(profile.textContent.includes('วันที่จดทะเบียนจัดตั้ง'));
+      assert.ok(profile.textContent.includes('รายชื่อผู้เป็นหุ้นส่วน / กรรมการ'));
+      assert.ok(profile.textContent.includes('ข้อมูลงบการเงิน'));
+      assert.ok([...profile.querySelectorAll('button')].some(node => node.textContent === 'เพิ่ม/แก้ไขงบ'));
       await click(document.querySelector('[aria-label="ปิดข้อมูลบริษัท"]'));
     } finally {
       await act(async () => root.unmount());

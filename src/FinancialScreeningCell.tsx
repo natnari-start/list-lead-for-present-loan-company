@@ -19,6 +19,19 @@ export function LatestFinancialCell({ customerId, rows }: Props) {
   </div>;
 }
 
+export function FinancialHistory({ customerId, rows }: Props) {
+  const periods = assessFinancials(rows, customerId).periods;
+  if (!periods.length) return <p className="muted-financial">ยังไม่มีข้อมูลงบการเงิน</p>;
+  return <div className="profile-financial-history">
+    {periods.slice(0, 3).map(period => <article key={`${period.year}-${period.id}`}>
+      <strong>ปี {period.year}{period.duplicate ? ' · พบรายการซ้ำ' : ''}</strong>
+      <span>กำไร (ขาดทุน) สุทธิ: {amount(period.netProfit)} บาท</span>
+      <span>รายได้รวม: {amount(period.revenue)} บาท</span>
+      <span>ดอกเบี้ยจ่าย: {amount(period.interestExpense)} บาท</span>
+    </article>)}
+  </div>;
+}
+
 export default function FinancialScreeningCell({ customerId, rows }: Props) {
   const result = assessFinancials(rows, customerId);
   const ratio = result.interestRatio === null

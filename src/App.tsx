@@ -5,7 +5,7 @@ import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
 import CustomerImportDialog from './CustomerImportDialog';
 import FinancialEditorDialog from './FinancialEditorDialog';
-import FinancialScreeningCell, { LatestFinancialCell } from './FinancialScreeningCell';
+import FinancialScreeningCell, { FinancialHistory, LatestFinancialCell } from './FinancialScreeningCell';
 import { assessFinancials, type OverallStatus } from './financial-screening';
 import {
   CONTACT_SEARCH_HEADER,
@@ -166,6 +166,9 @@ export default function App() {
   const spec = specs.find(item => item.key === part)!;
   const customerSpec = specs.find(item => item.key === 'customers')!;
   const companyNameIndex = customerSpec.headers.indexOf('ชื่อบริษัท');
+  const registrationIndex = customerSpec.headers.indexOf('เลขทะเบียนนิติบุคคล (13 หลัก)');
+  const registeredAtIndex = customerSpec.headers.indexOf('วันที่จดทะเบียน');
+  const directorsIndex = customerSpec.headers.indexOf('รายชื่อกรรมการ');
   const companySearch =
     part === 'customers' ? getCompanySearchLink(spec.headers, values) : null;
   const visibleRows = useMemo(
@@ -673,22 +676,45 @@ export default function App() {
                   ปิด
                 </button>
               </div>
-              <p className="small-note details-note">
-                แสดงข้อมูลทั้งหมดจากทะเบียนลูกค้า · โหมดอ่านอย่างเดียว
-              </p>
-              <div className="details-grid">
-                {customerSpec.headers.map((header, index) => {
+              <p className="small-note details-note">ข้อมูลสำคัญสำหรับตรวจสอบบริษัทและประเมินเบื้องต้นก่อนติดต่อ</p>
+              <div className="details-grid company-profile-grid">
+                {[
+                  ['ชื่อบริษัท', companyNameIndex],
+                  ['เลขทะเบียนนิติบุคคล (13 หลัก)', registrationIndex],
+                  ['วันที่จดทะเบียนจัดตั้ง', registeredAtIndex],
+                  ['รายชื่อผู้เป็นหุ้นส่วน / กรรมการ', directorsIndex],
+                ].map(([label, rawIndex]) => {
+                  const index = Number(rawIndex);
                   const value = selectedCustomer.values[index];
-                  return (
-                    <div className="detail-field" key={header}>
-                      <span>{header}</span>
-                      <strong>{header === CONTACT_SEARCH_HEADER
-                        ? displayValue('customers', index, value, data)
-                        : isBlank(value) ? '—' : String(value)}</strong>
-                    </div>
-                  );
+                  return <div className={`detail-field ${index === directorsIndex ? 'wide' : ''}`} key={String(label)}>
+                    <span>{label}</span>
+                    <strong>{isBlank(value) ? '—' : String(value)}</strong>
+                  </div>;
                 })}
               </div>
+              <section className="company-financial-section">
+                <div className="company-financial-heading">
+                  <div><p className="eyebrow">FINANCIAL PROFILE</p><h3>ข้อมูลงบการเงิน</h3></div>
+                  <button className="button primary" type="button" disabled={loading || sheetStatus !== 'connected'} onClick={() => {
+                    const customer = selectedCustomer;
+                    setSelectedCustomer(null);
+                    setFinancialCustomer(customer);
+                  }}>เพิ่ม/แก้ไขงบ</button>
+                </div>
+                <div className="company-financial-layout">
+                  <div><h4>งบย้อนหลัง</h4><FinancialHistory customerId={selectedCustomer.id} rows={data.financials || []} /></div>
+                  <div><h4>เกณฑ์ก่อนติดต่อ</h4><FinancialScreeningCell customerId={selectedCustomer.id} rows={data.financials || []} /></div>
+                </div>
+                <div className="financial-usage-note">
+                  <strong>วิธีใช้งาน</strong>
+                  <ol>
+                    <li>กรอกงบทีละปี อย่างน้อย 3 ปีติดต่อกัน</li>
+                    <li>ขาดทุนครบ 3 ปีติดต่อกันถือว่าไม่ผ่าน</li>
+                    <li>ดอกเบี้ยจ่าย ÷ รายได้รวม × 100 ต้องต่ำกว่า 5% โดย 5% พอดีถือว่าไม่ผ่าน</li>
+                    <li>ข้อมูลไม่ครบจะแสดง “ข้อมูลไม่พอประเมิน”</li>
+                  </ol>
+                </div>
+              </section>
               <div className="modal-foot">
                 <button className="button primary" type="button" disabled={loading || sheetStatus !== 'connected'} onClick={() => beginContact({ customerId: selectedCustomer.id })}>เพิ่มประวัติการติดต่อ</button>
                 <button
