@@ -5,7 +5,7 @@ import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
 import CustomerImportDialog from './CustomerImportDialog';
 import FinancialEditorDialog from './FinancialEditorDialog';
-import FinancialScreeningCell, { FinancialHistory, LatestFinancialCell } from './FinancialScreeningCell';
+import FinancialScreeningCell, { FinancialHistory } from './FinancialScreeningCell';
 import { assessFinancials, type OverallStatus } from './financial-screening';
 import {
   CONTACT_SEARCH_HEADER,
@@ -773,8 +773,6 @@ export default function App() {
             <thead>
               <tr>
                 {columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}
-                {part === 'customers' && <th>ข้อมูลงบการเงินปีล่าสุด</th>}
-                {part === 'customers' && <th>เกณฑ์ก่อนติดต่อ</th>}
                 {sheetStatus === 'connected' && <th>การดำเนินการ</th>}
               </tr>
             </thead>
@@ -800,14 +798,12 @@ export default function App() {
                       )}
                     </td>
                   ))}
-                  {part === 'customers' && <td className="latest-financial-cell"><LatestFinancialCell customerId={row.id} rows={data.financials || []} /></td>}
-                  {part === 'customers' && <td className="financial-screening-cell"><FinancialScreeningCell customerId={row.id} rows={data.financials || []} /></td>}
-                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'customers' && <button type="button" onClick={() => setFinancialCustomer(row)}>เพิ่ม/แก้ไขงบ</button>}{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
+                  {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
                 </tr>
               ))}
               {!visibleRows.length && (
                 <tr>
-                  <td colSpan={columns[part].length + (part === 'customers' ? 2 : 0) + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
+                  <td colSpan={columns[part].length + (sheetStatus === 'connected' ? 1 : 0)} className="empty">
                     {loading ? 'กำลังโหลด…' : 'ไม่พบรายการ'}
                   </td>
                 </tr>
