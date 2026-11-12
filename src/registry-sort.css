@@ -1,0 +1,197 @@
+.registry-sort-heading {
+  display: block;
+  margin-bottom: 5px;
+}
+.registry-sort-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-weight: 600;
+}
+.registry-sort-button:hover {
+  border-color: #b9d0e7;
+  background: #e3edf8;
+}
+.registry-sort-button[data-active='true'] {
+  border-color: #b9d0e7;
+  background: #e3edf8;
+  color: #164e82;
+}
+.registry-sort-arrow {
+  flex-shrink: 0;
+  color: #53657a;
+  font-size: 17px;
+}
+.registry-financial-sort {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.registry-financial-sort .registry-sort-button {
+  width: auto;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+.registry-sort-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.registry-sort-toolbar p {
+  margin: 0;
+  color: #53657a;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.registry-sort-mobile {
+  display: none;
+}
+@media (max-width: 780px) {
+  .registry-sort-desktop-hint {
+    display: none;
+  }
+  .registry-sort-toolbar {
+    padding: 12px;
+    border: 1px solid #dce4ee;
+    border-radius: 10px;
+    background: #fff;
+  }
+  .registry-sort-mobile {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+  .registry-sort-mobile label {
+    display: grid;
+    flex: 1 1 175px;
+    min-width: 0;
+    gap: 5px;
+    color: #53657a;
+    font-size: 12px;
+  }
+  .registry-sort-mobile select {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px;
+    border: 1px solid #c8d1df;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 16px;
+  }
+}
+
+.registry-business-filter {
+  width: 100%;
+  margin-bottom: 12px;
+  border: 1px solid #c8d1df;
+  border-radius: 10px;
+  background: #fff;
+}
+.registry-business-filter summary {
+  min-height: 44px;
+  padding: 12px;
+  cursor: pointer;
+  color: #164e82;
+  font-weight: 600;
+}
+.registry-business-filter summary:focus-visible {
+  outline: 3px solid #91b9df;
+  outline-offset: 2px;
+}
+.registry-business-filter fieldset {
+  min-width: 0;
+  margin: 0 12px;
+  padding: 10px;
+  border: 1px solid #dce4ee;
+  border-radius: 8px;
+}
+.registry-business-filter legend {
+  padding: 0 5px;
+  font-size: 13px;
+}
+.registry-business-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 12px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.registry-business-options label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.registry-business-options input[type='checkbox'] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  accent-color: #185d98;
+}
+.registry-business-options span {
+  overflow-wrap: anywhere;
+}
+.registry-business-options small {
+  margin-left: auto;
+  color: #68778a;
+}
+.registry-business-filter-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+}
+.registry-business-filter-footer small {
+  color: #53657a;
+}
+@media (max-width: 780px) {
+  .registry-business-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.company-contact-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: normal;
+}
+.company-contact-status.contacted {
+  background: #e6f4ea;
+  color: #22643b;
+}
+.company-contact-status.pending {
+  background: #edf3ff;
+  color: #244e88;
+}
+
+
+

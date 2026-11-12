@@ -11,7 +11,7 @@ import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-sear
 import { contactIndexes, validateContactValues } from '../src/contact-log';
 import { financialSchema, validateFinancialEntry } from '../src/financial-screening';
 import { createHash } from 'node:crypto';
-import { createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, deleteGoogleSheetsRecords, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, updateGoogleSheetsRecord } from './googleSheets';
+import { createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, deleteGoogleSheetsRecords, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, loadGoogleSheetsPayload, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
   key: string;
@@ -129,7 +129,7 @@ export const handler = router({
         if (!secretNames.includes('GOOGLE_SERVICE_ACCOUNT_JSON') || !secretNames.includes('GOOGLE_SPREADSHEET_ID')) {
           return error('ยังไม่ได้ตั้งค่า Google Sheets credential', 503);
         }
-        return json(await loadGoogleSheetsData(SPECS));
+        return json(await loadGoogleSheetsPayload(SPECS));
       } catch (cause) {
         const failure = describeGoogleSheetsFailure(cause);
         console.warn('google_sheets_data_load_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
@@ -267,6 +267,7 @@ export const handler = router({
       }
       for (const [indexText, choices] of Object.entries(spec.options || {})) {
         const index = Number(indexText);
+        if (spec.key === 'contacts' && ['ช่องทาง', 'ผลการติดต่อ'].includes(spec.headers[index])) continue;
         const value = values[index];
         if (changed(index) && value !== null && String(value) !== '' && !choices.includes(String(value))) {
           return error('ค่าของช่อง ' + spec.headers[index] + ' ไม่อยู่ในรายการที่กำหนด', 400);

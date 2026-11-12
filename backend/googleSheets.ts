@@ -1,6 +1,7 @@
 import { secrets } from '@appdeploy/sdk';
 import { CONTACT_SEARCH_HEADER, isContactSearchChecked } from '../src/contact-search-status';
 import { contactIndexes } from '../src/contact-log';
+import { toIsoDate } from '../src/google-sheet-date';
 
 type SheetSpec = {
   key: string;
@@ -25,7 +26,7 @@ type GoogleToken = {
 };
 
 type SpreadsheetMetadata = {
-  properties?: { title?: string; locale?: string };
+  properties?: { title?: string; locale?: string; timeZone?: string };
   namedRanges?: Array<{ namedRangeId?: string }>;
   sheets?: Array<{
     properties?: {
@@ -271,9 +272,9 @@ async function valuesUrl(range: string, unformattedDates = false): Promise<strin
 
 async function readRecordValues(range: string, spec: SheetSpec): Promise<ValuesResponse> {
   const formatted = await googleGet<ValuesResponse>(await valuesUrl(range));
-  if (spec.key !== 'contacts') return formatted;
+  if (!spec.dates?.length) return formatted;
   // Native table formats can be M/d/yyyy even when the workbook locale is Thai.
-  // Read only contact date values as numeric serials; keep formatted text/IDs.
+  // Read every date column as a numeric serial; keep formatted text/IDs.
   // Match by stable ID so a concurrent sort cannot attach another row's date.
   const numeric = await googleGet<ValuesResponse>(await valuesUrl(range, true));
   const byId = new Map((numeric.values || []).filter(row => row[0]).map(row => [String(row[0]), row]));
@@ -293,7 +294,7 @@ async function getMetadata(): Promise<SpreadsheetMetadata> {
     'https://sheets.googleapis.com/v4/spreadsheets/' +
       encodeURIComponent(spreadsheetId) +
       '?fields=' +
-      encodeURIComponent('properties(title,locale),namedRanges(namedRangeId),sheets(properties(sheetId,title,gridProperties(rowCount)),tables(tableId,range,columnProperties))')
+      encodeURIComponent('properties(title,locale,timeZone),namedRanges(namedRangeId),sheets(properties(sheetId,title,gridProperties(rowCount)),tables(tableId,range,columnProperties))')
   );
 }
 
@@ -309,38 +310,7 @@ function headersMatch(actual: unknown[] | undefined, expected: string[]): boolea
   return actual.slice(expected.length).every(value => value === '' || value === null);
 }
 
-function toIsoDate(value: unknown, locale: string, includeTime: boolean): unknown {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(Math.round((value - 25569) * 86400000));
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toISOString().slice(0, includeTime ? 19 : 10);
-  }
-  const raw = String(value).trim();
-  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (iso) {
-    const date = iso[1] + '-' + iso[2].padStart(2, '0') + '-' + iso[3].padStart(2, '0');
-    return includeTime && iso[4]
-      ? date + 'T' + iso[4].padStart(2, '0') + ':' + iso[5] + ':' + (iso[6] || '00')
-      : date;
-  }
-  const parts = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{2,4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (!parts) return raw;
-  const first = Number(parts[1]);
-  const second = Number(parts[2]);
-  const yearRaw = Number(parts[3]);
-  const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-  const isUs = /^(en_US|en-US)$/i.test(locale);
-  const month = isUs ? first : second;
-  const day = isUs ? second : first;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return raw;
-  const date = String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-  return includeTime && parts[4]
-    ? date + 'T' + parts[4].padStart(2, '0') + ':' + parts[5] + ':' + (parts[6] || '00')
-    : date;
-}
-
-function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: string): unknown {
+function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: string, strictSheetRead = false): unknown {
   if (value === null || value === undefined || value === '') return null;
   if (spec.headers[index] === CONTACT_SEARCH_HEADER &&
     (typeof value === 'boolean' || /^(TRUE|FALSE)$/i.test(String(value).trim()))) {
@@ -350,7 +320,8 @@ function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: 
     return toIsoDate(
       value,
       locale,
-      spec.key === 'contacts' && (index === 3 || index === 12)
+      spec.key === 'contacts' && (index === 3 || index === 12),
+      strictSheetRead
     );
   }
   if (spec.numbers?.includes(index)) {
@@ -396,7 +367,7 @@ export async function inspectGoogleSheets(
   };
 }
 
-export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetData> {
+async function loadGoogleSheetsSnapshot(specs: SheetSpec[]): Promise<{ data: SheetData; metadata: SpreadsheetMetadata }> {
   const metadata = await getMetadata();
   const sheets = new Map(
     (metadata.sheets || []).map(sheet => [sheet.properties?.title || '', sheet])
@@ -426,13 +397,30 @@ export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetDat
       .filter(row => row[0] !== null && row[0] !== undefined && String(row[0]).trim() !== '')
       .map(row => {
         const values = spec.headers.map((_, index) =>
-          normalizeValue(row[index], index, spec, metadata.properties?.locale || 'th_TH')
+          normalizeValue(row[index], index, spec, metadata.properties?.locale || 'th_TH', true)
         );
         return { id: String(values[0]), values };
       });
     data[spec.key] = rows;
   }
-  return data;
+  return { data, metadata };
+}
+
+export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetData> {
+  return (await loadGoogleSheetsSnapshot(specs)).data;
+}
+
+export async function loadGoogleSheetsPayload(specs: SheetSpec[]) {
+  const { data, metadata } = await loadGoogleSheetsSnapshot(specs);
+  return {
+    ...data,
+    _meta: {
+      dateNormalization: 'google_serial_v1',
+      spreadsheetTitle: metadata.properties?.title || '',
+      spreadsheetLocale: metadata.properties?.locale || '',
+      spreadsheetTimeZone: metadata.properties?.timeZone || '',
+    },
+  };
 }
 
 export class GoogleSheetsConflictError extends Error {

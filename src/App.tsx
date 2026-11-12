@@ -1,13 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
+import {
+  Users, Phone, CalendarCheck, BriefcaseBusiness, Files, RefreshCw, Search,
+  Plus, ChevronLeft, ChevronRight, SlidersHorizontal, Building2, CalendarDays,
+  Mail, MapPin, MapPinned, Banknote, Link2, ShieldCheck, FileText, Globe,
+  MessageCircle, CircleCheck, Hash,
+} from 'lucide-react';
+import './usability.css';
 import { schemas } from './schema';
 import { getCompanySearchLink } from './company-search';
 import ContactLogDialog from './ContactLogDialog';
+import ContactHistoryView from './ContactHistoryView';
+import { filterContactCompanies, groupContactHistory } from './contact-history';
 import CustomerImportDialog from './CustomerImportDialog';
+import DocumentChecklist from './DocumentChecklist';
+import CaseFollowUpWorkbench from './CaseFollowUpWorkbench';
+import { buildReadModel } from './crm-read-model';
+import { caseSummary } from './loan-case-view';
+import './document-checklist.css';
 import FinancialEditorDialog from './FinancialEditorDialog';
 import FinancialScreeningCell, { FinancialHistory, LatestFinancialCell, RegistryScreeningCell } from './FinancialScreeningCell';
 import { assessFinancials, type OverallStatus } from './financial-screening';
-import { filterCustomerRegistryRows } from './customer-registry';
+import {
+  customerBusinessType, filterCustomerRegistryRows, prioritizeUncontactedCustomers, registryBusinessTypeOptions, registrySortOptions, sortCustomerRegistryRows,
+  type RegistrySort, type RegistrySortKey,
+} from './customer-registry';
+import './registry-sort.css';
 import {
   CONTACT_SEARCH_HEADER,
   CONTACT_SEARCH_LABEL,
@@ -16,7 +34,13 @@ import {
 
 type Part = 'customers' | 'cases' | 'contacts' | 'tasks' | 'documents';
 type Row = { id: string; values: unknown[] };
-type Data = Record<Part, Row[]> & { financials?: Row[] };
+type ReadMetadata = {
+  dateNormalization?: string;
+  spreadsheetTitle?: string;
+  spreadsheetLocale?: string;
+  spreadsheetTimeZone?: string;
+};
+type Data = Record<Part, Row[]> & { financials?: Row[]; _meta?: ReadMetadata };
 type Spec = {
   key: Part;
   sheetName: string;
@@ -37,6 +61,14 @@ const names: Record<Part, string> = {
   documents: 'รายการเอกสาร',
 };
 const tabOrder: Part[] = ['customers', 'contacts', 'tasks', 'cases', 'documents'];
+const icons = { customers: Users, contacts: Phone, tasks: CalendarCheck, cases: BriefcaseBusiness, documents: Files };
+const descriptions: Record<Part, string> = {
+  customers: 'ค้นหาบริษัท ตรวจข้อมูล และเตรียมการติดต่อครั้งถัดไป',
+  contacts: 'บริษัทละหนึ่งแถว · คลิกจำนวนครั้งที่ติดต่อเพื่อดูประวัติทั้งหมด',
+  tasks: 'เริ่มจากงานวันนี้ ตรวจงานเกินกำหนด และเปิดดูรายละเอียด',
+  cases: 'ตรวจสถานะเคส งานที่เกี่ยวข้อง และเอกสารของลูกค้า',
+  documents: 'ตรวจรายการเอกสารและความครบถ้วนของแต่ละเคส',
+};
 const columns: Record<Part, number[]> = {
   customers: [2, 14],
   cases: [0, 1, 3, 5, 7, 12, 13],
@@ -66,22 +98,42 @@ const money = (value: unknown) =>
 const escCsv = (value: unknown) => {
   let text = value === null || value === undefined ? '' : String(value);
   if (/^[=+@\-\t\r]/.test(text)) text = `'${text}`;
-  return `"${text.replaceAll('"', '""')}"`;
+  return `"${text.replace(/"/g, '""')}"`;
 };
-const classifyTask = (row: unknown[], today: string) => {
-  if (!row[0]) return '';
-  if (row[7] === 'เสร็จแล้ว' || row[7] === 'ยกเลิก') return String(row[7]);
-  if (isBlank(row[5])) return 'ยังไม่กำหนดวัน';
-  const due = String(row[5]).slice(0, 10);
-  return due < today ? 'เกินกำหนด' : due === today ? 'วันนี้' : 'รอถึงกำหนด';
-};
+
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [part, setPart] = useState<Part>('customers');
   const [data, setData] = useState<Data>(blankData());
   const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  useEffect(() => { setPage(1); }, [part, query, pageSize]);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [dataLoadError, setDataLoadError] = useState('');
+  const [dataFetchedAt, setDataFetchedAt] = useState('');
+  const [datesVerified, setDatesVerified] = useState(false);
+  const [showLegacy, setShowLegacy] = useState(false);
   const [financialFilter, setFinancialFilter] = useState<'all' | OverallStatus>('all');
+  const [businessTypeFilter, setBusinessTypeFilter] = useState<string[]>([]);
+  const [registrySort, setRegistrySort] = useState<RegistrySort | null>(null);
+  const changeRegistrySort = (key: RegistrySortKey) => {
+    setRegistrySort(previous => ({
+      key,
+      direction: previous?.key === key && previous.direction === 'asc' ? 'desc' : 'asc',
+    }));
+    setPage(1);
+  };
+  const resetRegistrySort = () => {
+    setRegistrySort(null);
+    setPage(1);
+  };
+  const registrySortLabel = registrySortOptions.find(option => option.key === registrySort?.key)?.label || '';
+  const registrySortMessage = 'แสดงบริษัทที่ยังไม่ได้ติดต่อก่อน · ' + (registrySort
+    ? 'เรียงตาม' + registrySortLabel + 'ภายในแต่ละกลุ่ม · ' + (registrySort.direction === 'asc' ? 'น้อยไปมาก ↑' : 'มากไปน้อย ↓')
+    : 'ลำดับเริ่มต้นภายในแต่ละกลุ่ม');
+  useEffect(() => { setPage(1); }, [financialFilter, businessTypeFilter]);
   const [record, setRecord] = useState<Row | null>(null);
   const [contactContext, setContactContext] = useState<{ customerId?: string; caseId?: string } | null>(null);
   const [customerImportOpen, setCustomerImportOpen] = useState(false);
@@ -125,12 +177,19 @@ export default function App() {
   const load = async () => {
     setLoading(true);
     setError('');
+    setDataLoadError('');
     try {
       const response = await api.get('/api/data');
-      setData(response.data as Data);
+      const next = response.data as Data;
+      setData(next);
+      setDatesVerified(next._meta?.dateNormalization === 'google_serial_v1');
+      setDataLoaded(true);
+      setDataFetchedAt(new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' }).format(new Date()));
     } catch (cause) {
       const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(responseMessage || (cause instanceof Error ? cause.message : 'โหลดข้อมูลไม่สำเร็จ'));
+      setDataLoadError(responseMessage || 'โหลดข้อมูลไม่สำเร็จ');
+      setDatesVerified(false);
     } finally {
       setLoading(false);
     }
@@ -194,9 +253,27 @@ export default function App() {
     () => new Map(data.customers.map(row => [row.id, assessFinancials(data.financials || [], row.id)])),
     [data.customers, data.financials]
   );
+  const contactCompanies = useMemo(
+    () => groupContactHistory(data.contacts, data.customers),
+    [data.contacts, data.customers]
+  );
+  const contactedCustomerIds = useMemo(
+    () => new Set(contactCompanies.filter(company => company.linked && company.records.length > 0)
+      .map(company => company.customerId)),
+    [contactCompanies]
+  );
+  const visibleContactCompanies = useMemo(
+    () => filterContactCompanies(contactCompanies, query),
+    [contactCompanies, query]
+  );
+  const businessTypeOptions = useMemo(() => registryBusinessTypeOptions(data.customers), [data.customers]);
   const visibleRows = useMemo(
     () => {
-      if (part === 'customers') return filterCustomerRegistryRows(data.customers, query, financialFilter, customerAssessments);
+      if (part === 'customers') return prioritizeUncontactedCustomers(sortCustomerRegistryRows(
+        filterCustomerRegistryRows(data.customers, query, financialFilter, customerAssessments, businessTypeFilter),
+        registrySort,
+        customerAssessments
+      ), contactedCustomerIds);
       return (data[part] || []).filter(row => {
         const matchesQuery = !query || row.values.some(v =>
           String(v ?? '').toLowerCase().includes(query.toLowerCase())
@@ -204,18 +281,29 @@ export default function App() {
         return matchesQuery;
       });
     },
-    [data, part, query, financialFilter, customerAssessments]
+    [data, part, query, financialFilter, customerAssessments, registrySort, businessTypeFilter, contactedCustomerIds]
   );
   const customerSummary = useMemo(() => {
     const summary = { total: 0, pass: 0, fail: 0, incomplete: 0 };
     if (part !== 'customers') return summary;
-    for (const row of visibleRows) {
+    for (const row of filterCustomerRegistryRows(data.customers, query, 'all', customerAssessments, businessTypeFilter)) {
       summary.total += 1;
       const status = customerAssessments.get(row.id)?.overall || 'incomplete';
       summary[status] += 1;
     }
     return summary;
-  }, [part, visibleRows, customerAssessments]);
+  }, [part, data.customers, query, customerAssessments, businessTypeFilter]);
+  const pageCount = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedRows = visibleRows.slice(pageStart, pageStart + pageSize);
+  const hasRegistryFilters = !!query || (part === 'customers' && (financialFilter !== 'all' || businessTypeFilter.length > 0));
+  const clearRegistryFilters = () => {
+    setQuery('');
+    setFinancialFilter('all');
+    setBusinessTypeFilter([]);
+    setPage(1);
+  };
   const today = localDate();
   const customerCount = data.customers.filter(
     row => row.values[19] !== 'เก็บถาวร'
@@ -232,20 +320,8 @@ export default function App() {
     (sum, row) => sum + (Number(row.values[13]) || 0),
     0
   );
-  const dueToday = data.tasks.filter(
-    row => classifyTask(row.values, today) === 'วันนี้'
-  ).length;
-  const overdue = data.tasks.filter(
-    row => classifyTask(row.values, today) === 'เกินกำหนด'
-  ).length;
-  const casesWithoutTask = data.cases.filter(
-    loan =>
-      !data.tasks.some(
-        task =>
-          task.values[2] === loan.values[0] &&
-          !['เสร็จแล้ว', 'ยกเลิก'].includes(String(task.values[7]))
-      )
-  ).length;
+  const readModel = useMemo(() => buildReadModel(data), [data]);
+  const casesWithoutTask = [...readModel.cases.values()].filter(loan => caseSummary(readModel, loan).openCount === 0).length;
 
   const beginContact = (context: { customerId?: string; caseId?: string } = {}) => {
     setSelectedCustomer(null);
@@ -286,16 +362,27 @@ export default function App() {
     setError('');
   };
   const beginEdit = (row: Row) => {
+    const initial = [...row.values];
+    if (part === 'customers') {
+      const businessIndex = spec.headers.indexOf('ประเภทธุรกิจ');
+      const savedBusinessType = customerBusinessType(row);
+      if (isBlank(initial[businessIndex]) && savedBusinessType) initial[businessIndex] = savedBusinessType;
+    }
     setRecord(row);
-    setValues([...row.values]);
+    setValues(initial);
     setError('');
   };
   const setField = (index: number, value: string) =>
-    setValues(current =>
-      current.map((old, i) =>
-        i === index ? (value === '' ? null : value) : old
-      )
-    );
+    setValues(current => {
+      const legacyIndex = spec.headers.indexOf('ชื่อเรียก / ชื่อร้าน');
+      const clearLegacyBusinessType = part === 'customers' && spec.headers[index] === 'ประเภทธุรกิจ' &&
+        value === '' && (spec.options[String(index)] || []).includes(String(current[legacyIndex] ?? '').trim());
+      return current.map((old, i) => {
+        if (i === index) return value === '' ? null : value;
+        if (clearLegacyBusinessType && i === legacyIndex) return null;
+        return old;
+      });
+    });
   const relation = (index: number): 'customer' | 'case' | null => {
     if (
       (part === 'cases' || part === 'contacts' || part === 'tasks') &&
@@ -503,9 +590,12 @@ export default function App() {
   }
 
   function exportCsv() {
+    const exportRows = part === 'contacts'
+      ? visibleContactCompanies.flatMap(company => company.records)
+      : visibleRows;
     const lines = [
       spec.headers.map(escCsv).join(','),
-      ...visibleRows.map(row => row.values.map(escCsv).join(',')),
+      ...exportRows.map(row => row.values.map(escCsv).join(',')),
     ];
     const link = document.createElement('a');
     link.href = URL.createObjectURL(
@@ -522,12 +612,9 @@ export default function App() {
     setLoading(true);
     setError('');
     try {
-      const result = await auth.signIn({ scope: 'openid email profile offline_access' });
-      await api.get('/api/session');
-      setUser(result.user);
+      await auth.signInWithRedirect({ scope: 'openid email profile offline_access' });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'เข้าสู่ระบบไม่สำเร็จ');
-    } finally {
       setLoading(false);
     }
   }
@@ -557,6 +644,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-content">ข้ามไปยังรายการ</a>
       <header className="topbar">
         <div>
           <div className="brand">
@@ -574,108 +662,187 @@ export default function App() {
           ออกจากระบบ
         </button>
       </header>
-      <main className="main">
+            <div className="workspace-layout">
+        <aside className="workspace-sidebar">
+          <p className="sidebar-caption">พื้นที่ทำงาน</p>
+          <nav className="tabs" aria-label="เมนูหลัก">
+            {tabOrder.map(key => {
+              const Icon = icons[key];
+              return (
+                <button
+                  type="button"
+                  className={part === key ? 'selected' : ''}
+                  aria-current={part === key ? 'page' : undefined}
+                  key={key}
+                  onClick={() => {
+                    setPart(key);
+                    setQuery('');
+                    setFinancialFilter('all');
+                    setRecord(null);
+                    setContactContext(null);
+                    setCustomerImportOpen(false);
+                    setShowLegacy(false);
+                  }}
+                >
+                  <Icon size={19} aria-hidden="true" />
+                  {names[key]} <span>{!dataLoaded ? '—' : key === 'contacts' ? contactCompanies.length : data[key]?.length || 0}</span>
+                </button>
+              );
+            })}
+          </nav>
+          <div className="sidebar-help">
+            <strong>เริ่มงานอย่างเป็นขั้นตอน</strong>
+            <p>เลือกลูกค้า → ตรวจข้อมูล → บันทึกการติดต่อ → ทบทวนงานติดตาม</p>
+          </div>
+        </aside>
+      <main className="main" id="workspace-content" tabIndex={-1}>
         <section className="heading">
           <div>
-            <p className="eyebrow">CUSTOMER RELATIONSHIP</p>
-            <h1>ติดตามลูกค้าและงานสินเชื่อ</h1>
-            <p className="muted">
-              ข้อมูลจาก Google Sheets ต้นฉบับ · การบันทึกจะเปลี่ยนข้อมูลในชีตจริง
-            </p>
-            <p className="muted">
-              Google Sheets:{' '}
-              {sheetStatus === 'checking'
-                ? 'กำลังตรวจสอบ Google Sheets'
-                : sheetStatus === 'connected'
-                  ? 'เชื่อมต่อชีตและตรวจหัวตารางแล้ว'
-                  : sheetStatus === 'mismatch'
-                    ? 'หัวตารางไม่ตรง ระบบหยุดโหลดข้อมูล'
-                    : 'เชื่อมต่อไม่สำเร็จ ระบบไม่ใช้ข้อมูล Sandbox'}
-              {sheetMessage && sheetStatus !== 'connected' ? ' · ' + sheetMessage : ''}
-              {sheetStatus === 'connected' ? ' · แก้ไขรายการเดิมและเพิ่มประวัติการติดต่อได้' : ' · ปิดการแก้ไขจนกว่าจะเชื่อมต่อสำเร็จ'}
-            </p>
+            <p className="eyebrow">SME FREEDOM DESK</p>
+            <h1>{names[part]}</h1>
+            <p className="muted">{descriptions[part]}</p>
+          </div>
+          <div className="connection-status" data-state={sheetStatus} role="status">
+            <span className="connection-dot" aria-hidden="true" />
+            {sheetStatus === 'checking' ? 'กำลังตรวจการเชื่อมต่อ'
+              : sheetStatus === 'connected' ? 'เชื่อมต่อ Google Sheets'
+              : sheetStatus === 'mismatch' ? 'หัวตารางไม่ตรง' : 'เชื่อมต่อไม่สำเร็จ'}
           </div>
         </section>
-        <section className="stats">
-          <Stat label="ลูกค้าใช้งาน" value={customerCount} />
-          <Stat
-            label="งานวันนี้ / เกินกำหนด"
-            value={`${dueToday} / ${overdue}`}
-          />
-          <Stat label="วงเงินที่ขอ" value={money(requested)} />
-          <Stat
-            label="อนุมัติ / เบิกจ่าย"
-            value={`${money(approved)} / ${money(disbursed)}`}
-          />
-        </section>
-        <section className="status-line">
-          <b>เคสที่ยังไม่มีงานถัดไป</b>
-          <span>{casesWithoutTask}</span>
-          <small>จำนวนเคสแยกจากจำนวนลูกค้า · นับลูกค้าจากรหัสไม่ซ้ำ</small>
-        </section>
-        <nav className="tabs">
-          {tabOrder.map(key => (
-            <button
-              className={part === key ? 'selected' : ''}
-              key={key}
-              onClick={() => {
-                setPart(key);
-                setQuery('');
-                setFinancialFilter('all');
-                setRecord(null);
-                setContactContext(null);
-                setCustomerImportOpen(false);
-              }}
-            >
-              {names[key]} <span>{data[key]?.length || 0}</span>
-            </button>
-          ))}
-        </nav>
+        {sheetStatus !== 'connected' && sheetStatus !== 'checking' && (
+          <p className="error-banner" role="alert">
+            {sheetMessage || 'กรุณาตรวจการเชื่อมต่อ Google Sheets'} · ปิดการแก้ไขจนกว่าจะเชื่อมต่อสำเร็จ
+          </p>
+        )}
+        <details className="workspace-overview">
+          <summary>ภาพรวมลูกค้าและวงเงิน <span>เปิดดูข้อมูลสรุป</span></summary>
+          <section className="stats" aria-label="ภาพรวมข้อมูลที่โหลด">
+            <Stat label="ลูกค้าใช้งาน" value={dataLoaded ? customerCount : '—'} />
+            <Stat label="เคสสินเชื่อ" value={dataLoaded ? data.cases.length : '—'} />
+            <Stat label="วงเงินที่ขอ" value={dataLoaded ? money(requested) : '—'} />
+            <Stat label="อนุมัติ / เบิกจ่าย" value={dataLoaded ? `${money(approved)} / ${money(disbursed)}` : '—'} />
+          </section>
+          <p className="overview-note">เคสที่ยังไม่มีงานถัดไป: {dataLoaded ? casesWithoutTask : '—'} เคส · จำนวนเคสแยกจากจำนวนลูกค้า{dataLoadError ? ' · ข้อมูลเดิมก่อนการโหลดที่ไม่สำเร็จ' : ''}</p>
+        </details>
         <section className="section-heading">
           <div>
-            <h2>{names[part]}</h2>
-            <small>{part === 'customers' ? `${visibleRows.length} จาก ${data.customers.length} รายการ` : `${data[part]?.length || 0} รายการ`}</small>
+            <h2>{part === 'customers' ? 'รายชื่อลูกค้า' : part === 'contacts' ? 'บริษัทที่มีประวัติการติดต่อ' : names[part]}</h2>
+            <small>{dataLoadError ? 'โหลดข้อมูลไม่สำเร็จ · ตรวจข้อความแจ้งเตือน' : loading ? 'กำลังโหลดข้อมูล…' : dataFetchedAt ? `ข้อมูลล่าสุดที่ดึง: ${dataFetchedAt}` : 'กำลังเตรียมข้อมูล'}</small>
           </div>
           <div className="actions">
-            <button className="button" onClick={exportCsv}>
-              Export CSV
+            <button className="button" hidden={(part === 'cases' || part === 'tasks') && !showLegacy} onClick={exportCsv}>
+              {part === 'cases' || part === 'tasks' ? 'Export CSV ตารางเดิม' : part === 'contacts' ? 'Export CSV ประวัติ' : 'Export CSV'}
             </button>
             <button
               className="button"
               onClick={() => void load()}
               disabled={loading}
             >
-              รีเฟรช
+              <RefreshCw size={16} aria-hidden="true" className={loading ? 'is-spinning' : ''} />
+              {loading ? 'กำลังโหลด' : 'รีเฟรช'}
             </button>
             {part === 'customers' ? (
-              <button className="button primary" type="button" onClick={() => setCustomerImportOpen(true)} disabled={loading || sheetStatus !== 'connected'}>เพิ่มรายชื่อ</button>
+              <button className="button primary" type="button" onClick={() => setCustomerImportOpen(true)} disabled={loading || sheetStatus !== 'connected'}><Plus size={17} aria-hidden="true" /> เพิ่มรายชื่อ</button>
             ) : part === 'contacts' ? (
-              <button className="button primary" data-add-contact type="button" onClick={() => beginContact()} disabled={loading || sheetStatus !== 'connected'}>เพิ่มรายการ</button>
+              <button className="button primary" data-add-contact type="button" onClick={() => beginContact()} disabled={loading || sheetStatus !== 'connected'}><Plus size={17} aria-hidden="true" /> บันทึกการติดต่อ</button>
             ) : <small className="small-note">เพิ่มประวัติการติดต่อได้จากแท็บประวัติการติดต่อ</small>}
           </div>
         </section>
-        <div className="registry-filters">
-          <input
-            className="search"
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder={`ค้นหา${names[part]}`}
-          />
-          {part === 'customers' && <label className="financial-filter"><span>เกณฑ์ก่อนติดต่อ</span><select value={financialFilter} onChange={event => setFinancialFilter(event.target.value as typeof financialFilter)}>
-            <option value="all">ทั้งหมด</option>
-            <option value="pass">ผ่านเกณฑ์กรองเบื้องต้น</option>
-            <option value="fail">ไม่เข้าเกณฑ์กรองเบื้องต้น</option>
-            <option value="incomplete">ข้อมูลไม่พอประเมิน</option>
-          </select></label>}
+        <div className="registry-filters" hidden={part === 'cases' || part === 'tasks' || part === 'documents'}>
+          <label className="registry-search">
+            <span>ค้นหา{names[part]}</span>
+            <div className="search-control">
+              <Search size={18} aria-hidden="true" />
+              <input
+                type="search"
+                className="search"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                placeholder={part === 'customers' ? 'ชื่อบริษัท เบอร์โทร หรือเลขทะเบียน' : 'พิมพ์คำที่ต้องการค้นหา'}
+              />
+            </div>
+          </label>
+          {part === 'customers' && (
+            <label className="financial-filter">
+              <span><SlidersHorizontal size={14} aria-hidden="true" /> เกณฑ์ก่อนติดต่อ</span>
+              <select value={financialFilter} onChange={event => setFinancialFilter(event.target.value as typeof financialFilter)}>
+                <option value="all">ทั้งหมด</option>
+                <option value="pass">ผ่านเกณฑ์กรองเบื้องต้น</option>
+                <option value="fail">ไม่เข้าเกณฑ์กรองเบื้องต้น</option>
+                <option value="incomplete">ข้อมูลไม่พอประเมิน</option>
+              </select>
+            </label>
+          )}
+          {hasRegistryFilters && <button className="button reset-filters" type="button" onClick={clearRegistryFilters}>ล้างตัวกรอง</button>}
         </div>
-        {part === 'customers' && <p className="registry-result-count" aria-live="polite">แสดง {visibleRows.length} จาก {data.customers.length} รายการ</p>}
-        {part === 'customers' && <p className="screening-disclaimer">ผลนี้เป็นเกณฑ์กรองข้อมูลการเงินเบื้องต้น ไม่ใช่ผลอนุมัติสินเชื่อและไม่ยืนยันสิทธิ์ในการติดต่อ ต้องตรวจข้อห้ามติดต่อและ Call Verify แยกต่างหาก</p>}
-        {part === 'customers' && <section className="customer-summary-grid" aria-label="สรุปเกณฑ์ก่อนติดต่อของรายการที่แสดง">
-          <div><span>ลูกค้าที่แสดง</span><strong>{customerSummary.total}</strong></div>
-          <div className="pass"><span>ผ่านเกณฑ์</span><strong>{customerSummary.pass}</strong></div>
-          <div className="fail"><span>ไม่ผ่านเกณฑ์</span><strong>{customerSummary.fail}</strong></div>
-          <div className="incomplete"><span>ข้อมูลไม่พอประเมิน</span><strong>{customerSummary.incomplete}</strong></div>
-        </section>}
+        {part === 'customers' && (
+          <>
+            <details className="registry-business-filter">
+              <summary>ประเภทธุรกิจ · {businessTypeFilter.length ? 'เลือก ' + businessTypeFilter.length + ' ประเภท' : 'ทั้งหมด'}</summary>
+              <fieldset>
+                <legend>เลือกประเภทธุรกิจที่ต้องการแสดง</legend>
+                <div className="registry-business-options">
+                  {businessTypeOptions.map(option => (
+                    <label key={option.value}>
+                      <input
+                        type="checkbox"
+                        aria-label={option.label}
+                        checked={businessTypeFilter.includes(option.value)}
+                        onChange={event => setBusinessTypeFilter(current => event.target.checked
+                          ? [...current, option.value]
+                          : current.filter(value => value !== option.value))}
+                      />
+                      <span>{option.label}</span><small>{option.count}</small>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="registry-business-filter-footer">
+                <small>เลือกได้หลายประเภท · ไม่เลือกจะแสดงทั้งหมด</small>
+                <button className="button" type="button" disabled={!businessTypeFilter.length}
+                  onClick={() => setBusinessTypeFilter([])}>แสดงทั้งหมด</button>
+              </div>
+            </details>
+            <div className="registry-sort-toolbar">
+              <p className="registry-sort-desktop-hint" aria-live="polite">{registrySortMessage}</p>
+              <div className="registry-sort-mobile">
+                <label>เรียงลูกค้าตาม
+                  <select
+                    value={registrySort?.key || ''}
+                    onChange={event => {
+                      if (!event.target.value) resetRegistrySort();
+                      else changeRegistrySort(event.target.value as RegistrySortKey);
+                    }}
+                  >
+                    <option value="">ลำดับเดิม</option>
+                    {registrySortOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+                  </select>
+                </label>
+                <button className="button" type="button" disabled={!registrySort}
+                  onClick={() => registrySort && changeRegistrySort(registrySort.key)}>
+                  {registrySort?.direction === 'desc' ? 'มากไปน้อย ↓' : 'น้อยไปมาก ↑'}
+                </button>
+              </div>
+              {registrySort?.key === 'screening' && <p>{registrySort.direction === 'asc'
+                ? 'ผ่านเกณฑ์ → ไม่ผ่านเกณฑ์ → ข้อมูลไม่พอ'
+                : 'ข้อมูลไม่พอ → ไม่ผ่านเกณฑ์ → ผ่านเกณฑ์'}</p>}
+              {registrySort && <button className="button" type="button" onClick={resetRegistrySort}>คืนลำดับเดิม</button>}
+            </div>
+            <section className="customer-summary-grid" aria-label="กรองลูกค้าตามเกณฑ์เบื้องต้น">
+              {([
+                ['all', 'ทั้งหมด', customerSummary.total],
+                ['pass', 'ผ่านเกณฑ์', customerSummary.pass],
+                ['fail', 'ไม่ผ่านเกณฑ์', customerSummary.fail],
+                ['incomplete', 'ข้อมูลไม่พอ', customerSummary.incomplete],
+              ] as const).map(([filter, label, count]) => (
+                <button className={filter} type="button" key={filter} aria-pressed={financialFilter === filter} onClick={() => setFinancialFilter(filter)}>
+                  <span>{label}</span><strong>{dataLoaded ? count : '—'}</strong>
+                </button>
+              ))}
+            </section>
+            <p className="screening-disclaimer">เกณฑ์กรองการเงินเบื้องต้น ไม่ใช่ผลอนุมัติสินเชื่อ · ตรวจข้อห้ามติดต่อและ Call Verify ก่อนติดต่อทุกครั้ง</p>
+          </>
+        )}
         {error && (
           <div className="error-banner" role="alert">{error}<button onClick={() => setError('')}>ปิด</button></div>
         )}
@@ -745,9 +912,7 @@ export default function App() {
                   <h2 id="customer-details-title">
                     {String(selectedCustomer.values[2] || 'ข้อมูลบริษัท')}
                   </h2>
-                  <p className="small-note details-meta">
-                    รหัสลูกค้า: {String(selectedCustomer.values[0] || '—')}
-                  </p>
+
                 </div>
                 <button
                   className="button"
@@ -873,10 +1038,10 @@ export default function App() {
         })()}
         {record && (
           <div className="modal-backdrop">
-            <form className="modal edit-modal" onSubmit={save}>
+            <form className="modal edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-record-title" onSubmit={save}>
               <div className="modal-head">
                 <div className="edit-heading">
-                  <h2>แก้ไข{names[part]}</h2>
+                  <h2 id="edit-record-title">แก้ไข{names[part]}</h2>
                   {companySearch && (
                     <a
                       className="company-search-link"
@@ -892,15 +1057,25 @@ export default function App() {
                 </div>
                 <button className="button" type="button" onClick={() => setRecord(null)}>ปิด</button>
               </div>
-              <p className="small-note">การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets · รหัสรายการและช่องคำนวณอัตโนมัติแก้ไขไม่ได้</p>
+              <p className="small-note">{part === 'customers'
+                ? 'การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets'
+                : 'การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets · รหัสรายการและช่องคำนวณอัตโนมัติแก้ไขไม่ได้'}</p>
               {error && <div className="error-banner">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
               <div className="form-grid">
-                {spec.headers.map((header, index) => part === 'contacts' && header === 'รายละเอียดธุรกิจจากการติดต่อ (JSON)' ? null : (
-                  <label className={spec.longText?.includes(index) || header.length > 38 ? 'wide' : ''} key={header}>
-                    <span>{header}{spec.required.includes(index) ? <b className="required"> *</b> : ''}</span>
-                    {makeFormControl(index)}
-                  </label>
-                ))}
+                {spec.headers.map((header, index) => {
+                  if (part === 'customers' && (index === 0 || header === 'ชื่อเรียก / ชื่อร้าน')) return null;
+                  if (part === 'contacts' && header === 'รายละเอียดธุรกิจจากการติดต่อ (JSON)') return null;
+                  const FieldIcon = customerFieldIcon(header);
+                  return (
+                    <label className={spec.longText?.includes(index) || header.length > 38 ? 'wide' : ''} key={header}>
+                      <span className={part === 'customers' ? 'customer-field-label' : undefined}>
+                        {part === 'customers' && <FieldIcon className="customer-field-icon" size={16} aria-hidden="true" focusable="false" />}
+                        <span>{header}{spec.required.includes(index) ? <b className="required"> *</b> : ''}</span>
+                      </span>
+                      {makeFormControl(index)}
+                    </label>
+                  );
+                })}
               </div>
               <div className="modal-foot">
                 <button className="button" type="button" onClick={() => setRecord(null)}>ยกเลิก</button>
@@ -911,22 +1086,57 @@ export default function App() {
             </form>
           </div>
         )}
-        <div className={`table-wrap ${part === 'customers' ? 'customer-registry-wrap' : ''}`}>
-          {part === 'customers' ? <table className="customer-registry-table">
-            <thead><tr><th>บริษัท</th><th>เบอร์โทรศัพท์</th><th>งบปีล่าสุด</th><th>เกณฑ์ก่อนติดต่อ</th><th>การดำเนินการ</th></tr></thead>
+        <div hidden={part !== 'cases' && part !== 'tasks'}>
+          <CaseFollowUpWorkbench data={data} part={part === 'tasks' ? 'tasks' : 'cases'} loaded={dataLoaded} loading={loading} loadError={dataLoadError} fetchedAt={dataFetchedAt} datesVerified={datesVerified} onPartChange={setPart} />
+          <button className="button" type="button" aria-expanded={showLegacy} onClick={() => setShowLegacy(s => !s)}>{showLegacy ? 'ซ่อนตารางเดิม' : 'เปิดตารางเดิมสำหรับแก้ไข'}</button>
+          {showLegacy && <p className="small-note">ตารางและการแก้ไขเดิมใช้ตัวกรองเดิม ไม่ใช่ตัวกรองของมุมมองใหม่</p>}
+        </div>
+        <div hidden={(part === 'cases' || part === 'tasks') && !showLegacy} className={part === 'contacts' ? 'contact-history-wrap' : `table-wrap ${part === 'customers' ? 'customer-registry-wrap' : ''}`}>
+          {part === 'contacts' ? <ContactHistoryView
+            groups={visibleContactCompanies}
+            totalCompanies={contactCompanies.length}
+            query={query}
+            loading={loading}
+            loadError={dataLoadError}
+            disabled={loading || sheetStatus !== 'connected'}
+            onAdd={customerId => beginContact({ customerId })}
+            onEdit={beginEdit}
+          /> : part === 'documents' ? <DocumentChecklist cases={data.cases} customers={data.customers} documents={data.documents} /> : part === 'customers' ? <table className="customer-registry-table">
+            <thead><tr>
+              <th scope="col">บริษัท</th>
+              <th scope="col">ประเภทธุรกิจ</th>
+              <th scope="col">เบอร์โทรศัพท์</th>
+              <th scope="col" aria-sort={registryAriaSort(registrySort, ['year', 'profit'])}>
+                <span className="registry-sort-heading">งบปีล่าสุด</span>
+                <div className="registry-financial-sort">
+                  <RegistrySortButton field="year" label="ปีงบ" sort={registrySort} onSort={changeRegistrySort} />
+                  <RegistrySortButton field="profit" label="กำไรสุทธิ" sort={registrySort} onSort={changeRegistrySort} />
+                </div>
+              </th>
+              <th scope="col" aria-sort={registryAriaSort(registrySort, ['screening'])}>
+                <RegistrySortButton field="screening" label="เกณฑ์ก่อนติดต่อ" sort={registrySort} onSort={changeRegistrySort} />
+              </th>
+              <th scope="col">การดำเนินการ</th>
+            </tr></thead>
             <tbody>
-              {visibleRows.map(row => {
+              {pagedRows.map(row => {
                 const assessment = customerAssessments.get(row.id)!;
                 const companyName = String(row.values[companyNameIndex] || 'ไม่ระบุชื่อบริษัท');
                 const registration = row.values[registrationIndex];
+                const businessType = customerBusinessType(row);
+                const contacted = contactedCustomerIds.has(row.id);
                 const writeDisabled = loading || sheetStatus !== 'connected';
                 return <tr key={row.id}>
                   <td data-label="บริษัท">
                     <div className="company-registry-cell">
                       <button type="button" className="company-name-button" onClick={() => openCompanyProfile(row)} aria-haspopup="dialog" aria-label={`เปิดข้อมูลบริษัท ${companyName}`}>{companyName}</button>
                       {!isBlank(registration) && <small>เลขทะเบียน {String(registration)}</small>}
+                      <span className={`company-contact-status ${contacted ? 'contacted' : 'pending'}`}>
+                        {contacted ? 'ได้รับการติดต่อแล้ว' : 'ยังไม่ได้ติดต่อ'}
+                      </span>
                     </div>
                   </td>
+                  <td data-label="ประเภทธุรกิจ" className={!businessType ? 'muted-financial' : ''}>{businessType || 'ยังไม่ระบุ'}</td>
                   <td data-label="เบอร์โทรศัพท์" className={isBlank(row.values[phoneIndex]) ? 'muted-financial' : ''}>{isBlank(row.values[phoneIndex]) ? 'ไม่มีเบอร์โทร' : String(row.values[phoneIndex])}</td>
                   <td data-label="งบปีล่าสุด" className="latest-financial-cell"><LatestFinancialCell customerId={row.id} rows={data.financials || []} /></td>
                   <td data-label="เกณฑ์ก่อนติดต่อ" className="financial-screening-cell"><RegistryScreeningCell customerId={row.id} rows={data.financials || []} /></td>
@@ -939,12 +1149,16 @@ export default function App() {
                   </td>
                 </tr>;
               })}
-              {!visibleRows.length && <tr><td colSpan={5} className="empty">{loading ? 'กำลังโหลด…' : query || financialFilter !== 'all' ? 'ไม่พบลูกค้าที่ตรงกับการค้นหาและตัวกรอง' : 'ยังไม่มีรายชื่อลูกค้า'}</td></tr>}
+              {!visibleRows.length && <tr><td colSpan={6} className="empty">
+                <strong>{loading ? 'กำลังโหลดข้อมูลลูกค้า…' : dataLoadError ? 'ยังแสดงข้อมูลลูกค้าไม่ได้' : hasRegistryFilters ? 'ไม่พบลูกค้าที่ตรงกับตัวกรอง' : 'เริ่มต้นทะเบียนลูกค้าของคุณ'}</strong>
+                <p>{dataLoadError ? 'ตรวจการเชื่อมต่อแล้วกดรีเฟรชอีกครั้ง' : hasRegistryFilters ? 'ลองใช้คำค้นสั้นลง หรือดูรายชื่อทั้งหมด' : 'เพิ่มรายชื่อเพื่อเริ่มตรวจข้อมูลและเตรียมการติดต่อ'}</p>
+                {hasRegistryFilters && <button className="button" type="button" onClick={clearRegistryFilters}>ล้างตัวกรอง</button>}
+              </td></tr>}
             </tbody>
           </table> : <table>
             <thead><tr>{columns[part].map(index => (<th key={index}>{spec.headers[index]}</th>))}{sheetStatus === 'connected' && <th>การดำเนินการ</th>}</tr></thead>
             <tbody>
-              {visibleRows.map(row => <tr key={row.id}>
+              {pagedRows.map(row => <tr key={row.id}>
                 {columns[part].map(index => <td key={index}>{displayValue(part, index, row.values[index], data)}</td>)}
                 {sheetStatus === 'connected' && <td className="row-actions"><button type="button" onClick={() => beginEdit(row)}>แก้ไข</button>{part === 'cases' && <button type="button" onClick={() => beginContact({ caseId: row.id, customerId: String(row.values[spec.headers.indexOf('รหัสลูกค้า')]) })}>บันทึกการติดต่อ</button>}</td>}
               </tr>)}
@@ -952,14 +1166,80 @@ export default function App() {
             </tbody>
           </table>}
         </div>
+        {part !== 'documents' && part !== 'contacts' && (!(part === 'cases' || part === 'tasks') || showLegacy) && visibleRows.length > 0 && (
+          <nav className="pagination" aria-label="แบ่งหน้ารายการ">
+            <p role="status">แสดง {pageStart + 1}–{Math.min(pageStart + pageSize, visibleRows.length)} จาก {visibleRows.length} รายการ</p>
+            <label>ต่อหน้า
+              <select value={pageSize} onChange={event => setPageSize(Number(event.target.value))}>
+                <option value={20}>20</option><option value={50}>50</option><option value={100}>100</option>
+              </select>
+            </label>
+            <div className="pagination-buttons">
+              <button className="button" type="button" aria-label="หน้าก่อนหน้า" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={18} aria-hidden="true" /></button>
+              <span>หน้า {currentPage} / {pageCount}</span>
+              <button className="button" type="button" aria-label="หน้าถัดไป" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}><ChevronRight size={18} aria-hidden="true" /></button>
+            </div>
+          </nav>
+        )}
+        <p className="workspace-footer">ข้อมูลจาก Google Sheets · การบันทึกจะเปลี่ยนข้อมูลในชีตจริง</p>
       </main>
-
+      </div>
     </div>
   );
 }
 
-function customerName(data: Data, id: unknown) {
+
+function registryAriaSort(sort: RegistrySort | null, keys: RegistrySortKey[]): 'ascending' | 'descending' | 'none' {
+  if (!sort || !keys.includes(sort.key)) return 'none';
+  return sort.direction === 'asc' ? 'ascending' : 'descending';
+}
+
+function RegistrySortButton({
+  field, label, sort, onSort,
+}: {
+  field: RegistrySortKey;
+  label: string;
+  sort: RegistrySort | null;
+  onSort: (key: RegistrySortKey) => void;
+}) {
+  const active = sort?.key === field;
+  const direction = active ? sort.direction : null;
   return (
+    <button
+      className="registry-sort-button"
+      type="button"
+      data-active={active}
+      onClick={() => onSort(field)}
+      aria-label={'เรียงตาม' + label + ' · คลิกเพื่อเรียง' + (direction === 'asc' ? 'มากไปน้อย' : 'น้อยไปมาก')}
+    >
+      <span>{label}</span>
+      <span className="registry-sort-arrow" aria-hidden="true">{direction === 'asc' ? '↑' : direction === 'desc' ? '↓' : '↕'}</span>
+    </button>
+  );
+}
+
+function customerFieldIcon(header: string) {
+  if (header === CONTACT_SEARCH_HEADER) return Search;
+  if (header === 'ชื่อบริษัท') return Building2;
+  if (header.includes('รหัส') || header.includes('เลขทะเบียน') || header.includes('เลขอ้างอิง')) return Hash;
+  if (header.startsWith('วันที่') || header.includes('ปีข้อมูล')) return CalendarDays;
+  if (header.includes('รายได้') || header.includes('กำไร') || header.includes('ยอดขาย')) return Banknote;
+  if (header.includes('ประเภทธุรกิจ') || header === 'ชื่อเรียก / ชื่อร้าน' || header.includes('ประเภทนิติบุคคล')) return BriefcaseBusiness;
+  if (header.includes('พิกัด') || header.includes('Maps')) return MapPinned;
+  if (header.includes('จังหวัด') || header.includes('อำเภอ') || header.includes('ที่อยู่')) return MapPin;
+  if (header.includes('โทรศัพท์')) return Phone;
+  if (header.includes('อีเมล')) return Mail;
+  if (header.includes('ผู้ติดต่อ') || header.includes('กรรมการ') || header.includes('หุ้นส่วน')) return Users;
+  if (/Facebook|LINE|Instagram|TikTok|YouTube|LinkedIn/.test(header)) return MessageCircle;
+  if (/Website|Marketplace/.test(header)) return Globe;
+  if (header.includes('แหล่ง')) return Link2;
+  if (header.includes('ระงับ')) return ShieldCheck;
+  if (header.includes('สถานะ')) return CircleCheck;
+  return FileText;
+}
+
+function customerName(data: Data, id: unknown) {
+  return String(
     data.customers.find(row => String(row.values[0]) === String(id))
       ?.values[2] ||
     id ||
@@ -988,3 +1268,4 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     </article>
   );
 }
+

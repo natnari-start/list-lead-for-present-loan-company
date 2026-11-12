@@ -64,3 +64,4 @@ export default function FinancialScreeningCell({ customerId, rows }: Props) {
     {result.reason && <small className="screening-reason">{result.reason}</small>}
   </div>;
 }
+
