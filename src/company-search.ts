@@ -11,3 +11,4 @@ export function getCompanySearchLink(
     href: `https://www.google.com/search?q=${encodeURIComponent(name)}`,
   };
 }
+

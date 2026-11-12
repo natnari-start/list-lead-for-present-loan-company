@@ -111,7 +111,7 @@ export default function CustomerImportDialog({ headers, existingRows, disabled, 
     const registration = String(draft.values[registrationIndex] ?? '').trim();
     if (registration && existingRows.some(row => String(row.values[registrationIndex] ?? '').trim() === registration)) return 'เลขทะเบียนซ้ำกับข้อมูลเดิม';
     const name = String(draft.values[companyIndex] ?? '').trim().toLocaleLowerCase('th-TH');
-    if (name && existingRows.some(row => String(row.values[companyIndex] ?? '').trim().toLocaleLowerCase('th-TH') === name)) return 'ชื่อบริษัทตรงกับข้อมูลเดิม โปรดตรวจรหัสลูกค้าก่อนยืนยัน';
+    if (name && existingRows.some(row => String(row.values[companyIndex] ?? '').trim().toLocaleLowerCase('th-TH') === name)) return 'ชื่อบริษัทตรงกับข้อมูลเดิม โปรดตรวจข้อมูลบริษัทเดิมก่อนยืนยัน';
     return '';
   };
   const rowsToDrafts = (rows: unknown[][], source: string) => {
@@ -204,7 +204,8 @@ export default function CustomerImportDialog({ headers, existingRows, disabled, 
           {!!drafts.length && <div className="customer-import-table-wrap"><table><thead><tr>{previewHeaders.map(header => <th key={header}>{header}</th>)}<th>ตรวจซ้ำ</th><th>ลบ</th></tr></thead><tbody>{drafts.map(draft => <tr key={draft.draftId}>{previewHeaders.map(header => <td key={header}><input value={String(draft.values[indexes[header]] ?? '')} onChange={event => setValue(draft.draftId, header, event.target.value)} /></td>)}<td>{duplicateWarning(draft) || '—'}</td><td><button type="button" disabled={busy} onClick={() => setDrafts(current => current.filter(item => item.draftId !== draft.draftId))}>ลบ</button></td></tr>)}</tbody></table></div>}
         </div>}
       </div>
-      <footer className="modal-foot"><small>{drafts.length} รายชื่อรอบันทึก · ระบบจะสร้างรหัสและวันที่ฝั่ง backend</small><button className="button" type="button" disabled={busy} onClick={onClose}>ยกเลิก</button><button className="button primary" type="button" disabled={disabled || busy || !drafts.length} onClick={() => void save()}>{busy ? 'กำลังดำเนินการ…' : `ยืนยันเพิ่ม ${drafts.length} รายชื่อ`}</button></footer>
+      <footer className="modal-foot"><small>{drafts.length} รายชื่อรอบันทึก</small><button className="button" type="button" disabled={busy} onClick={onClose}>ยกเลิก</button><button className="button primary" type="button" disabled={disabled || busy || !drafts.length} onClick={() => void save()}>{busy ? 'กำลังดำเนินการ…' : `ยืนยันเพิ่ม ${drafts.length} รายชื่อ`}</button></footer>
     </section>
   </div>;
 }
+

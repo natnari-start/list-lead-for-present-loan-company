@@ -1,0 +1,15 @@
+/* Read-only checklist; scoped to avoid changing existing CRM tables. */
+.document-checklist { display: grid; gap: 1rem; padding: 1rem; max-width: 100%; }
+.document-checklist header h2 { margin: 0 0 .3rem; }
+.document-checklist header p, .document-checklist .document-note { color: #555; margin: .2rem 0; }
+.document-checklist > select { width: 100%; max-width: 42rem; min-height: 2.75rem; padding: .5rem; }
+.document-checklist [role="group"] { display: flex; gap: .5rem; flex-wrap: wrap; }
+.document-checklist [role="group"] button { min-height: 2.75rem; padding: .5rem 1rem; border: 1px solid #888; border-radius: .4rem; }
+.document-checklist [role="group"] button[aria-pressed="true"] { font-weight: 700; border-width: 2px; }
+.document-checklist ul { margin: 0; padding-left: 1.5rem; overflow-wrap: anywhere; }
+.document-checklist li { padding: .5rem 0; }
+.document-checklist li + li { border-top: 1px solid #ddd; }
+.document-checklist li p { margin: .25rem 0; }
+.document-checklist [role="alert"] { border-left: 3px solid #b42318; padding: .5rem .75rem; }
+@media (max-width: 480px) { .document-checklist { padding: .75rem; } .document-checklist [role="group"] button { flex: 1 1 8rem; } }
+

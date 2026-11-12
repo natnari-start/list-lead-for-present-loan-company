@@ -1,147 +1,167 @@
 [
   {
-    "name": "Authorized admin inspects existing CRM workflows and cancels safely",
+    "name": "Customer search, screening filters and pagination preserve the registry",
     "sanity": true,
     "viewport": "desktop",
     "covers": [
       "Google authentication",
       "admin allowlist",
-      "Google Sheets source",
-      "existing-record editor",
-      "immutable record identifiers",
-      "cancel without writing",
-      "spreadsheet tab and header verification",
-      "customer, case, contact, task, document navigation",
-      "company detail popup",
-      "all customer registry fields",
-      "read-only company details",
-      "manual contact-search control",
-      "company Google Search link"
+      "production or TEST Google Sheets source",
+      "customer registry search",
+      "screening quick filters",
+      "clear registry filters",
+      "pagination",
+      "company profile and financial history",
+      "customer ID hidden in registry profile and edit form",
+      "internal customer relationship keys preserved",
+      "saved-contact status and stable uncontacted-first registry priority",
+      "customer registry sortable column headers",
+      "business type multi-checkbox filtering and financial year net profit screening sorts",
+      "ascending and descending aria-sort indicators",
+      "sorting across all filtered pages",
+      "sorted registry CSV export",
+      "restore original row order",
+      "missing financial values stay last",
+      "company and phone headers are not sortable"
     ],
-    "description": "Checks an authorized admin can open the form for an existing sheet record, see protected fields, and cancel without changing the sheet.",
+    "description": "Verifies the primary customer workflow can find records, recover from no results and page through the registry without writes.",
     "steps": [
-      "Sign in with the authorized Google account",
-      "Wait until Google Sheets data is loaded",
-      "Visit all five data tabs and confirm each table uses its matching sheet",
-      "Return to the customer register, open a company name and confirm every registry field is present and read only",
-      "Close the company profile",
-      "Open the edit form for a visible record",
-      "Confirm the record identifier is read only",
-      "Cancel the form without saving",
-      "Inspect the separate manual Google contact-search checkbox without changing it",
-      "Inspect the company Google Search link attributes without following a production company search"
+      "Sign in using the authorized Google account and wait for data to load. Do not add, edit or delete records. In the registry, confirm companies without linked contact history appear before companies with history across the full list and all pages. Existing linked history shows ได้รับการติดต่อแล้ว beneath the company name, regardless of the recorded outcome; companies without history show ยังไม่ได้ติดต่อ. Same-name companies use their exact customer relationship, and orphan records do not mark another company.",
+      "In ทะเบียนลูกค้า, search for UX-NO-MATCH-7429 and confirm the no-results message. Click ล้างตัวกรอง and confirm loaded records are restored. Confirm the registry includes a ประเภทธุรกิจ column after บริษัท. Each row shows its saved business type, with ยังไม่ระบุ for an empty value; a recognized selection from the renamed business type field is used when the category is empty, and old shop names never appear as business types. Existing financial/screening sorts remain unchanged.",
+      "Confirm บริษัท and เบอร์โทรศัพท์ headers have no sorting buttons. Use ปีงบ and กำไรสุทธิ under งบปีล่าสุด and the เกณฑ์ก่อนติดต่อ header to toggle ascending/descending; verify direction arrows and page-one reset. Missing or duplicate-year profits remain last. Click คืนลำดับเดิม. Confirm ประเภทธุรกิจ has no arrow sorting button. Open its checkbox field above the registry, select one type then a second type, and confirm only matching companies from either selected type are displayed. Select ยังไม่ระบุ to include missing types. Combine with search and screening filters; verify page-one reset, filtered summary totals and CSV export. Use แสดงทั้งหมด, then ล้างตัวกรอง, and confirm all matching records return without changing saved data. Financial and screening sorting applies within the uncontacted/contacted groups, with uncontacted companies first even after คืนลำดับเดิม. Filter and CSV use the same complete prioritized list.",
+      "Select ข้อมูลไม่พอ and confirm the matching dropdown and highlighted filter agree. Click ทั้งหมด to return to all screening states.",
+      "Change ต่อหน้า to 50. If there are more than 50 matches, use หน้าถัดไป then หน้าก่อนหน้า and confirm different records and correct row ranges. Otherwise confirm หน้าถัดไป is disabled.",
+      "If a customer exists, open the company name and confirm no customer ID is displayed. Expand financial history and close the profile. Open แก้ไขทะเบียน and confirm there is no customer ID input and exactly one ประเภทธุรกิจ dropdown; the duplicate text field and its suggestions are absent. The dropdown retains all existing choices including the seven added types and the saved value (using a recognized legacy selection only when the canonical value is empty). Change its selection and verify only one visible business type control changes; other controls and data remain unchanged. Confirm all visible fields retain their decorative leading icons and required markers, then cancel without saving."
     ],
-    "expected": "The edit form shows the selected record and read-only identifier; cancel closes the form and leaves the source data unchanged."
+    "expected": "Search and filter reset restore the full registry, pagination shows the correct range without losing records, and company details retain the selected customer context. No data is changed. The profile and registry edit form omit the customer ID while existing financial and contact relationships still work. Uncontacted companies precede contacted companies across the complete filtered set; header sorting applies within each group before pagination and export, uses numeric financial values, preserves source records and can restore the original order."
   },
   {
-    "name": "Create and retain one synthetic contact history",
-    "viewport": "mobile",
-    "covers": [
-      "POST /api/records contacts",
-      "stable customer/case references",
-      "Google Sheets append and reload persistence",
-      "Bangkok datetime",
-      "atomic idempotency receipt",
-      "no automatic task or customer update",
-      "structured business JSON round-trip",
-      "funding plan and five optional answers",
-      "employee quality observations are not approval",
-      "document stage without case changes",
-      "reviewed draft text is saved verbatim"
-    ],
-    "description": "Creates a new contact only in the isolated synthetic app and verifies durable storage without altering prior rows.",
-    "steps": [
-      "Use only the synthetic test app and SYN-TEST-CUST-001 / SYN-TEST-CASE-001; never run writes on Production",
-      "Sign in, open ประวัติการติดต่อ and choose เพิ่มรายการ",
-      "Select SYN-TEST-CUST-001 and matching SYN-TEST-CASE-001, a Thai contact time, โทรศัพท์ and outcome สนใจ; explicitly select funding plan มีแผน",
-      "Open ได้สอบถามข้อมูลธุรกิจแล้ว, enter synthetic business type บริการทดสอบ and monthly sales 123 บาท — ข้อมูลสังเคราะห์; leave the other answers blank. In quality observations choose ไม่ผ่านตามที่พนักงานเห็น for business age, inspect the 6/8-year warning and choose ขอ Prescreen for document stage",
-      "Enter synthetic facts, preview with ช่วยร่างบันทึก, edit the draft facts to PHASE2-SYNTHETIC-STRUCTURED and explicitly apply; save twice while pending",
-      "Wait for backend-confirmed success and refresh",
-      "Read the test sheet: exactly one matching CONTACT ID exists, its date/time matches the form, and existing rows/customers/tasks are unchanged"
-    ],
-    "expected": "Exactly one matching synthetic contact persists after refresh with reviewed facts and crmContactV1 JSON in column O; missing answers stay absent, unknown quality remains unknown and the failed observation does not block saving. Prior histories, legacy JSON, customers, cases, tasks and document rows are unchanged."
-  },
-  {
-    "name": "All six contact outcomes and reviewed local draft",
-    "viewport": "mobile",
-    "covers": [
-      "six outcome branches",
-      "hidden optional fields",
-      "two-minute no-answer workflow",
-      "draft preview and explicit apply",
-      "no invented permission",
-      "keyboard focus",
-      "sticky mobile footer",
-      "legacy JSON hidden",
-      "editable preview",
-      "explicit overwrite confirmation",
-      "unknown quality defaults",
-      "no automatic qualification",
-      "DNC and red Call Verify never offer sales tasks"
-    ],
-    "description": "Inspects all outcome forms and draft behavior without saving.",
-    "steps": [
-      "Use the synthetic test app, open เพิ่มรายการ and select the synthetic customer",
-      "Inspect ติดต่อไม่ได้, ขอคุยใหม่, สนใจ, ติดตามสถานะ, ไม่สนใจครั้งนี้ and ขอไม่ให้ติดต่ออีก",
-      "Confirm no-answer, no-interest and DNC outcomes hide business questions, quality and document stage; hidden fields are not required and raw JSON/BANT/MEDDIC are absent",
-      "For ขอคุยใหม่ enter a callback date without selecting permission, then choose ช่วยร่างบันทึก",
-      "Verify the preview labels the callback as awaiting confirmation and creates no permission statement; inspect it and apply explicitly",
-      "For สนใจ inspect the five optional questions and eight optional employee observations, then use and edit the local preview; cancel replacement to keep the original text, then explicitly confirm applying it",
-      "Check keyboard focus/Tab/Escape and a 375px mobile viewport; confirm the save footer remains available while the body scrolls",
-      "Cancel without saving"
-    ],
-    "expected": "Only relevant fields appear, drafting uses provided text locally with review before apply, consent is not inferred and cancellation writes nothing."
-  },
-  {
-    "name": "Failed contact creation retains draft and retries the same request",
+    "name": "Sidebar navigation preserves case, task and document workflows",
     "viewport": "desktop",
     "covers": [
-      "POST /api/records failure",
-      "retained input",
-      "repeat-submit protection",
-      "no false success",
-      "same-key retry"
+      "contextual headings",
+      "primary navigation",
+      "case overview",
+      "task dashboard",
+      "stable customer case task IDs",
+      "case to task navigation",
+      "task to case navigation",
+      "document checklist handoff",
+      "read-only case and task views",
+      "collapsible workspace overview",
+      "one contact row per company",
+      "clickable total contact count",
+      "complete company contact timeline",
+      "newest-first history",
+      "contact search retains full company history",
+      "existing contact edit and add context",
+      "free-text channel and outcome in new contact form",
+      "company-name-only selection preserves internal linkage",
+      "optional free-text contact note",
+      "Call Verify and synthetic examples absent from new form",
+      "POST /api/records visible failure and retained note",
+      "legacy contacts preserved",
+      "POST and PUT accept custom channel and outcome text"
     ],
-    "description": "Injects a synthetic save failure and verifies recovery controls retain the original request.",
+    "description": "Verifies the new navigation and compact overview retain the existing read-only loan workflow.",
+    "steps": [
+      "Sign in using the authorized account and open ภาพรวมลูกค้าและวงเงิน, then collapse it.",
+      "Open เคสสินเชื่อ and verify ภาพรวมเคสสินเชื่อ and the read-only notice.",
+      "If a case has linked tasks, open the case then one linked task and return to the case. Verify the case ID remains the same.",
+      "Open รายการเอกสาร and confirm the checklist or its existing empty state is usable.",
+      "Open ประวัติการติดต่อ. Confirm each linked company appears once and จำนวนครั้งที่ติดต่อ is a button. If records exist, click one company's count, verify only that company's complete contact history appears with dates, channels, outcomes and facts, and close it. Search for a note in one company's history and confirm its total count and full timeline remain available. Verify บันทึกการติดต่อ remains available without saving.",
+      "Open บันทึกการติดต่อ, select a company by name only, and confirm no customer ID is displayed in its label or options. Confirm ช่องทาง and ผลการติดต่อ are editable text inputs. Leave case/date/note fields as before. Enter LINE ส่วนตัว as the channel, ขอให้ส่งข้อความอีกครั้ง as the result, and a multiline note. Submit to the injected failing POST; confirm the same inputs and note remain and then cancel without changing saved history."
+    ],
+    "expected": "Each menu displays the corresponding content and active state. Case/task IDs stay consistent, documents remain accessible, and the overview can be collapsed without blocking the workflow. Contacts are grouped by company with the full recorded count, and the count opens that company's complete history without mixing other companies or deleting records. The form shows only company names, accepts arbitrary nonblank channel and result text, retains all inputs and the optional note on a failed request, and leaves other fields and historic Call Verify or legacy contact values unchanged. A failed contact save must not change a company's registry contact status or position; after a confirmed new contact is saved, that company is marked ได้รับการติดต่อแล้ว and remaining uncontacted companies fill the earlier rows without deleting any company or history.",
     "qa_faults": [
       {
         "method": "POST",
         "path": "/api/records",
         "status": 502,
         "body_json": {
-          "error": "Synthetic contact create failure"
+          "error": "PHONE_TEST_FAULT"
+        }
+      }
+    ]
+  },
+  {
+    "name": "Mobile follow-up filters reset and customer cards stay readable",
+    "viewport": "mobile",
+    "covers": [
+      "mobile primary navigation",
+      "mobile customer cards",
+      "mobile touch targets",
+      "task search and filter reset",
+      "due-date groups",
+      "do-not-contact warnings",
+      "unknown data guardrails",
+      "no mutation from read-only views",
+      "mobile contact company cards",
+      "mobile contact timeline dialog",
+      "mobile customer sorting controls",
+      "mobile company-name and free-text contact fields"
+    ],
+    "description": "Verifies meaningful mobile navigation, filtering and read-only review remain usable at 375px.",
+    "steps": [
+      "Sign in using the authorized account and navigate with the horizontally scrollable main menu.",
+      "Open งานติดตาม. Enter UX-NO-MATCH-7429 in ค้นหางาน and select the do-not-contact filter. Click ล้างตัวกรองทั้งหมด.",
+      "Confirm search is empty, the do-not-contact checkbox is unchecked and all available tasks return.",
+      "Inspect a task detail if available and return. Do not perform contact, completion or calendar actions.",
+      "Open ทะเบียนลูกค้า, inspect a customer card if available and use its company-name button to open and close the profile. Confirm content stays inside the page width. Confirm the company profile does not display a customer ID. Confirm the company card includes ประเภทธุรกิจ with the same saved value as the desktop table and wraps long values. Confirm mobile cards show the contact-history status below the company name and uncontacted companies appear first. Open แก้ไขทะเบียน and confirm its label icons stay beside wrapped text and inputs remain usable on mobile; cancel without saving.",
+      "In ทะเบียนลูกค้า on mobile, confirm เรียงลูกค้าตาม offers only ลำดับเดิม, ปีงบล่าสุด, กำไรสุทธิของงบปีล่าสุด and เกณฑ์ก่อนติดต่อ. Choose ปีงบล่าสุด, toggle direction and click คืนลำดับเดิม. Expand the ประเภทธุรกิจ checkbox field, select two types, confirm matching mobile customer cards, then use แสดงทั้งหมด. The business-type sort option is absent.",
+      "Open ประวัติการติดต่อ on mobile. If a company has history, click its count, inspect the timeline, expand ดูข้อมูลเพิ่มเติม, close the dialog and confirm the grouped company list is restored.",
+      "On mobile, open บันทึกการติดต่อ, confirm company options display names only, enter custom ช่องทาง and ผลการติดต่อ text, confirm case/date/optional note remain unchanged, and cancel without saving."
+    ],
+    "expected": "Mobile menus, filter reset and details work without clipped primary controls; existing date-verification and contact warnings remain visible and no record is modified."
+  },
+  {
+    "name": "Source failure stays visible and does not enable verified task totals",
+    "viewport": "mobile",
+    "covers": [
+      "Google Sheets API errors",
+      "user-visible source error",
+      "date verification fail-closed",
+      "no silent Sandbox fallback",
+      "source retry UI",
+      "quota error separation",
+      "authentication independent of Sheets",
+      "reconnect button"
+    ],
+    "description": "Verifies failed source loading remains explicit in the revised layout and does not replace real data with demo records.",
+    "qa_faults": [
+      {
+        "method": "GET",
+        "path": "/api/data",
+        "status": 429,
+        "body_json": {
+          "error": "Google Sheets เกินโควตาการเรียกใช้งาน กรุณารอประมาณหนึ่งนาทีแล้วลองเชื่อมต่อใหม่"
         }
       }
     ],
     "steps": [
-      "Use only the isolated synthetic app, sign in and open เพิ่มรายการ",
-      "Select SYN-TEST-CUST-001, enter a short no-answer contact and save",
-      "Wait for the injected failure; confirm the form remains with its original values and no success is shown",
-      "Inspect the retry action: it uses the original immutable request payload rather than creating a new record identity",
-      "Cancel and verify the synthetic sheet has no new row from the rejected request"
+      "Sign in using the authorized account and wait for the injected source failure.",
+      "Confirm a source-error message is visible in the workspace.",
+      "Open งานติดตาม and confirm a source error is shown instead of operational current totals.",
+      "Return to ทะเบียนลูกค้า and confirm a visible retry or refresh control is available. Do not write any records.",
+      "Verify the workspace remains signed in and shows ลองเชื่อมต่อใหม่. Click reconnect once; the quota error stays visible if the injected fault remains. Do not modify Google Sheets."
     ],
-    "expected": "The draft is retained, repeated clicks create no extra request while pending, and no successful write is claimed."
+    "expected": "Source failure remains visible, dates stay unverified, and no Sandbox records or current task totals replace the failed response. The session remains signed in and retry is available; no Sandbox records appear."
   },
   {
-    "name": "Manual Google contact-search mark persists for one synthetic customer",
-    "viewport": "mobile",
+    "name": "Signed-out users cannot enter the protected workspace",
+    "viewport": "desktop",
     "covers": [
-      "manual search result checkbox",
-      "stable customer ID with duplicate company names",
-      "native Google Sheets checkbox persistence",
-      "keyboard Space activation",
-      "existing company details and search link"
+      "anonymous access boundary",
+      "sign-out",
+      "private-data protection",
+      "protected workspace navigation"
     ],
-    "description": "Checks manual marking and unmarking on the isolated synthetic sheet without affecting a duplicate-name customer.",
+    "description": "Verifies the redesigned workspace still requires the existing authorized sign-in.",
     "steps": [
-      "Use only the synthetic test app and synthetic customer IDs SYN-TEST-CUST-001 and SYN-TEST-CUST-002; never run writes against production",
-      "Sign in and open the customer register; confirm both names have a separate checkbox labelled seach google ไม่พบข้อมูลช่องทางติดต่อ",
-      "Use Space on the checkbox for SYN-TEST-CUST-001 and wait for confirmed success",
-      "Refresh and reopen the app in a second view; confirm only SYN-TEST-CUST-001 is checked",
-      "Open the company profile and confirm the new status is read only; open and cancel the editor to confirm the Google Search link still exists",
-      "Uncheck SYN-TEST-CUST-001 and refresh; confirm the mark is removed and neither company gained changed contact details"
+      "Sign in using the authorized account, then click ออกจากระบบ.",
+      "Confirm the Google sign-in screen is shown and the customer registry, main workspace navigation and record controls are not rendered.",
+      "Reload the page and confirm the sign-in screen remains and no customer records are visible."
     ],
-    "expected": "The selected synthetic customer retains its mark after refresh and in another view, then retains the unmarked result; the duplicate-name row is unchanged and checkbox interaction opens no dialog or Google tab."
+    "expected": "Signed-out users see only the sign-in screen and no protected customer, case, contact, task or document data."
   }
 ]
-

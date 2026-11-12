@@ -10,21 +10,20 @@
     "build:ci": "vite build --config vite.ci.config.ts",
     "test": "node --experimental-strip-types --test tests/unit/*.test.mjs && node scripts/validate-appdeploy-tests.mjs && node scripts/validate-appdeploy-tests.mjs tests/production-smoke.json && node scripts/check-public-source.mjs",
     "verify:prelive": "npm run build:ci && npm test",
-    "check:public-source": "node scripts/check-public-source.mjs"
+    "check:public-source": "node scripts/check-public-source.mjs",
+    "test:sheets": "node --experimental-strip-types --test tests/sheets-resilience.test.mjs tests/unit/sheets-reconnect-ui.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.469.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "pdfjs-dist": "^4.10.38",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "^4.0.0"
   },
   "devDependencies": {
-    "esbuild": "^0.25.12",
-    "jsdom": "26.1.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -32,6 +31,8 @@
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "esbuild": "^0.25.12",
+    "jsdom": "26.1.0"
   }
 }

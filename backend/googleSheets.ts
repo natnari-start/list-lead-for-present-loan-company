@@ -1,6 +1,8 @@
+import { sharedSheetsRead, invalidateSharedSheetsCache } from './sheetsReadCache';
 import { secrets } from '@appdeploy/sdk';
 import { CONTACT_SEARCH_HEADER, isContactSearchChecked } from '../src/contact-search-status';
 import { contactIndexes } from '../src/contact-log';
+import { toIsoDate } from '../src/google-sheet-date';
 
 type SheetSpec = {
   key: string;
@@ -25,7 +27,7 @@ type GoogleToken = {
 };
 
 type SpreadsheetMetadata = {
-  properties?: { title?: string; locale?: string };
+  properties?: { title?: string; locale?: string; timeZone?: string };
   namedRanges?: Array<{ namedRangeId?: string }>;
   sheets?: Array<{
     properties?: {
@@ -52,6 +54,8 @@ type FailureCategory =
   | 'sheet_not_found'
   | 'credential_invalid'
   | 'configuration_missing'
+  | 'quota_exceeded'
+  | 'secret_read_failed'
   | 'upstream_error';
 
 class GoogleSheetsFailure extends Error {
@@ -59,6 +63,7 @@ class GoogleSheetsFailure extends Error {
   status?: number;
   reason?: string;
   stage: string;
+  retryAfterMs?: number;
 
   constructor(category: FailureCategory, status?: number, reason?: string, stage = 'unknown') {
     super('Google Sheets connection failed');
@@ -69,8 +74,28 @@ class GoogleSheetsFailure extends Error {
   }
 }
 
+function responseFailure(response: Response, reason: string, stage: string): GoogleSheetsFailure {
+  const failure = new GoogleSheetsFailure(classifyGoogleFailure(response.status, reason), response.status, reason, stage);
+  const header = response.headers.get('Retry-After');
+  if (header) {
+    const seconds = Number(header);
+    failure.retryAfterMs = Math.max(0, Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now());
+  }
+  return failure;
+}
+
+export async function assertGoogleSheetsConfiguration(): Promise<void> {
+  let names: string[];
+  try { names = await secrets.listSecretNames(); }
+  catch { throw new GoogleSheetsFailure('secret_read_failed', undefined, 'secret_list_failed', 'secret_read'); }
+  if (!names.includes('GOOGLE_SPREADSHEET_ID') || !names.includes('GOOGLE_SERVICE_ACCOUNT_JSON')) {
+    throw new GoogleSheetsFailure('configuration_missing', undefined, 'missing_secret', 'secret_read');
+  }
+}
+
 function classifyGoogleFailure(status: number, reason = ''): FailureCategory {
   const normalized = reason.toLowerCase();
+  if (status === 429 || /ratelimit|resource_exhausted|quota/.test(normalized)) return 'quota_exceeded';
   if (normalized.includes('accessnotconfigured') || normalized.includes('servicedisabled')) return 'api_disabled';
   if (status === 401 || normalized.includes('invalid_grant') || normalized.includes('unauthorized')) return 'credential_invalid';
   if (status === 404 || normalized.includes('notfound')) return 'sheet_not_found';
@@ -93,7 +118,9 @@ export function describeGoogleSheetsFailure(cause: unknown): {
     permission_denied: 'service account ไม่มีสิทธิ์เข้าถึงชีต หรือยังไม่มีสิทธิ์แก้ไข กรุณาแชร์ชีตให้ client_email ของ service account เป็น Editor',
     sheet_not_found: 'ไม่พบชีต หรือ service account ไม่มีสิทธิ์เข้าถึงไฟล์ กรุณาตรวจ spreadsheet ID และการแชร์',
     credential_invalid: 'credential ของ service account ไม่ถูกต้องหรือหมดอายุ กรุณาตรวจ secret GOOGLE_SERVICE_ACCOUNT_JSON',
-    configuration_missing: 'ยังไม่ได้ตั้งค่า GOOGLE_SPREADSHEET_ID ใน AppDeploy secrets',
+    configuration_missing: 'ยังไม่ได้ตั้งค่า GOOGLE_SPREADSHEET_ID หรือ GOOGLE_SERVICE_ACCOUNT_JSON ใน AppDeploy secrets',
+    quota_exceeded: 'Google Sheets เกินโควตาการเรียกใช้งาน กรุณารอประมาณหนึ่งนาทีแล้วลองเชื่อมต่อใหม่',
+    secret_read_failed: 'อ่านค่าตั้งค่าจาก AppDeploy ไม่สำเร็จชั่วคราว กรุณาลองใหม่ ยังไม่ยืนยันว่า Secret หาย',
     upstream_error: 'การเชื่อมต่อกับ Google ล้มเหลว กรุณาตรวจสถานะ API และเครือข่ายของ backend',
   };
   const stages: Record<string, string> = {
@@ -142,7 +169,7 @@ async function createAccessToken(): Promise<string> {
   try {
     rawCredential = await secrets.readSecret('GOOGLE_SERVICE_ACCOUNT_JSON');
   } catch {
-    throw new GoogleSheetsFailure('credential_invalid', undefined, 'secret_read', 'secret_read');
+    throw new GoogleSheetsFailure('secret_read_failed', undefined, 'secret_read', 'secret_read');
   }
   let account: ServiceAccount;
   try {
@@ -212,11 +239,26 @@ async function createAccessToken(): Promise<string> {
   return token.access_token;
 }
 
+async function fetchWithQuotaRetry(url: string, init: RequestInit): Promise<Response> {
+  // Retry only an explicit quota rejection. Never replay ambiguous writes.
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt >= 3 || (init.method && init.method !== 'GET')) return response;
+    const retryAfter = response.headers.get('Retry-After');
+    const seconds = retryAfter === null ? NaN : Number(retryAfter);
+    const serverDelay = Number.isFinite(seconds) ? seconds * 1000
+      : retryAfter ? Date.parse(retryAfter) - Date.now() : 0;
+    if (serverDelay > 8000) return response;
+    await new Promise(resolve => setTimeout(resolve,
+      Math.max(1000 * 2 ** attempt + Math.floor(Math.random() * 1000), serverDelay || 0)));
+  }
+}
+
 async function googleGet<T>(url: string): Promise<T> {
   const token = await createAccessToken();
   let response: Response;
   try {
-    response = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    response = await fetchWithQuotaRetry(url, { headers: { Authorization: 'Bearer ' + token } });
   } catch {
     throw new GoogleSheetsFailure('upstream_error', undefined, 'network_error', 'sheets_network');
   }
@@ -251,7 +293,7 @@ async function getSpreadsheetId(): Promise<string> {
   try {
     value = (await secrets.readSecret('GOOGLE_SPREADSHEET_ID')).trim();
   } catch {
-    throw new GoogleSheetsFailure('configuration_missing', undefined, 'missing_secret', 'spreadsheet_config');
+    throw new GoogleSheetsFailure('secret_read_failed', undefined, 'secret_read', 'spreadsheet_config');
   }
   if (!/^[A-Za-z0-9_-]+$/.test(value)) {
     throw new GoogleSheetsFailure('configuration_missing', undefined, 'invalid_spreadsheet_id', 'spreadsheet_config');
@@ -271,9 +313,9 @@ async function valuesUrl(range: string, unformattedDates = false): Promise<strin
 
 async function readRecordValues(range: string, spec: SheetSpec): Promise<ValuesResponse> {
   const formatted = await googleGet<ValuesResponse>(await valuesUrl(range));
-  if (spec.key !== 'contacts') return formatted;
+  if (!spec.dates?.length) return formatted;
   // Native table formats can be M/d/yyyy even when the workbook locale is Thai.
-  // Read only contact date values as numeric serials; keep formatted text/IDs.
+  // Read every date column as a numeric serial; keep formatted text/IDs.
   // Match by stable ID so a concurrent sort cannot attach another row's date.
   const numeric = await googleGet<ValuesResponse>(await valuesUrl(range, true));
   const byId = new Map((numeric.values || []).filter(row => row[0]).map(row => [String(row[0]), row]));
@@ -293,7 +335,7 @@ async function getMetadata(): Promise<SpreadsheetMetadata> {
     'https://sheets.googleapis.com/v4/spreadsheets/' +
       encodeURIComponent(spreadsheetId) +
       '?fields=' +
-      encodeURIComponent('properties(title,locale),namedRanges(namedRangeId),sheets(properties(sheetId,title,gridProperties(rowCount)),tables(tableId,range,columnProperties))')
+      encodeURIComponent('properties(title,locale,timeZone),namedRanges(namedRangeId),sheets(properties(sheetId,title,gridProperties(rowCount)),tables(tableId,range,columnProperties))')
   );
 }
 
@@ -309,38 +351,7 @@ function headersMatch(actual: unknown[] | undefined, expected: string[]): boolea
   return actual.slice(expected.length).every(value => value === '' || value === null);
 }
 
-function toIsoDate(value: unknown, locale: string, includeTime: boolean): unknown {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const date = new Date(Math.round((value - 25569) * 86400000));
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toISOString().slice(0, includeTime ? 19 : 10);
-  }
-  const raw = String(value).trim();
-  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (iso) {
-    const date = iso[1] + '-' + iso[2].padStart(2, '0') + '-' + iso[3].padStart(2, '0');
-    return includeTime && iso[4]
-      ? date + 'T' + iso[4].padStart(2, '0') + ':' + iso[5] + ':' + (iso[6] || '00')
-      : date;
-  }
-  const parts = raw.match(/^(\d{1,2})[/. -](\d{1,2})[/. -](\d{2,4})(?:[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (!parts) return raw;
-  const first = Number(parts[1]);
-  const second = Number(parts[2]);
-  const yearRaw = Number(parts[3]);
-  const year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
-  const isUs = /^(en_US|en-US)$/i.test(locale);
-  const month = isUs ? first : second;
-  const day = isUs ? second : first;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return raw;
-  const date = String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-  return includeTime && parts[4]
-    ? date + 'T' + parts[4].padStart(2, '0') + ':' + parts[5] + ':' + (parts[6] || '00')
-    : date;
-}
-
-function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: string): unknown {
+function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: string, strictSheetRead = false): unknown {
   if (value === null || value === undefined || value === '') return null;
   if (spec.headers[index] === CONTACT_SEARCH_HEADER &&
     (typeof value === 'boolean' || /^(TRUE|FALSE)$/i.test(String(value).trim()))) {
@@ -350,7 +361,8 @@ function normalizeValue(value: unknown, index: number, spec: SheetSpec, locale: 
     return toIsoDate(
       value,
       locale,
-      spec.key === 'contacts' && (index === 3 || index === 12)
+      spec.key === 'contacts' && (index === 3 || index === 12),
+      strictSheetRead
     );
   }
   if (spec.numbers?.includes(index)) {
@@ -373,66 +385,89 @@ export async function inspectGoogleSheets(
   spreadsheetTitle: string;
   checkedSheets: Array<{ name: string; headerCount: number; headersMatch: boolean }>;
 }> {
-  const metadata = await getMetadata();
-  const availableNames = new Set(
-    (metadata.sheets || []).map(sheet => sheet.properties?.title || '')
-  );
-  const checkedSheets = await Promise.all(specs.map(async spec => {
-    if (!availableNames.has(spec.sheetName)) {
-      return { name: spec.sheetName, headerCount: 0, headersMatch: !!spec.optional };
-    }
-    const actual = await readHeader(spec);
-    return {
-      name: spec.sheetName,
-      headerCount: actual.filter(value => value !== '' && value !== null).length,
-      headersMatch: headersMatch(actual, spec.headers),
-    };
-  }));
+  const { metadata } = await cachedReadSnapshot(specs);
   return {
-    connected: checkedSheets.every(sheet => sheet.headersMatch),
+    connected: true,
     mode: 'read-only-check',
     spreadsheetTitle: metadata.properties?.title || '',
-    checkedSheets,
+    checkedSheets: specs.map(spec => ({ name: spec.sheetName, headerCount: spec.headers.length, headersMatch: true })),
   };
 }
 
-export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetData> {
+async function batchValues(ranges: string[], numeric = false): Promise<ValuesResponse[]> {
+  if (!ranges.length) return [];
+  const query = new URLSearchParams({ majorDimension: 'ROWS',
+    valueRenderOption: numeric ? 'UNFORMATTED_VALUE' : 'FORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' });
+  for (const range of ranges) query.append('ranges', range);
+  const result = await googleGet<{ valueRanges?: ValuesResponse[] }>(
+    'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(await getSpreadsheetId()) + '/values:batchGet?' + query);
+  if (result.valueRanges?.length !== ranges.length) throw new Error('Google Sheets returned incomplete ranges');
+  return result.valueRanges;
+}
+
+async function loadGoogleSheetsSnapshot(specs: SheetSpec[]): Promise<{ data: SheetData; metadata: SpreadsheetMetadata }> {
   const metadata = await getMetadata();
-  const sheets = new Map(
-    (metadata.sheets || []).map(sheet => [sheet.properties?.title || '', sheet])
-  );
-  const data: SheetData = {};
-  for (const spec of specs) {
-    const sheet = sheets.get(spec.sheetName);
-    if (!sheet && spec.optional) {
-      data[spec.key] = [];
-      continue;
-    }
-    if (!sheet) throw new Error('Required Google Sheet tab is missing');
-    const header = await readHeader(spec);
-    if (!headersMatch(header, spec.headers)) {
-      throw new Error('Google Sheet headers do not match the application schema');
-    }
-    const gridRows = sheet.properties?.gridProperties?.rowCount || 1;
-    if (gridRows > MAX_GRID_ROWS) {
-      throw new Error('Google Sheet exceeds the safe row limit for a complete read');
-    }
-    const lastColumn = columnName(spec.headers.length);
-    const range = "'" + spec.sheetName.replace(/'/g, "''") + "'!A2:" + lastColumn + gridRows;
-    const response = gridRows > 1
-      ? await readRecordValues(range, spec)
-      : { values: [] };
-    const rows = (response.values || [])
-      .filter(row => row[0] !== null && row[0] !== undefined && String(row[0]).trim() !== '')
-      .map(row => {
-        const values = spec.headers.map((_, index) =>
-          normalizeValue(row[index], index, spec, metadata.properties?.locale || 'th_TH')
-        );
-        return { id: String(values[0]), values };
-      });
-    data[spec.key] = rows;
-  }
-  return data;
+  const sheets = new Map((metadata.sheets || []).map(sheet => [sheet.properties?.title || '', sheet]));
+  const active = specs.filter(spec => {
+    if (sheets.has(spec.sheetName)) return true;
+    if (spec.optional) return false;
+    throw new Error('Required Google Sheet tab is missing');
+  });
+  const ranges = active.map(spec => {
+    const rows = sheets.get(spec.sheetName)?.properties?.gridProperties?.rowCount || 1;
+    if (rows > MAX_GRID_ROWS) throw new Error('Google Sheet exceeds the safe row limit for a complete read');
+    return "'" + spec.sheetName.replace(/'/g, "''") + "'!A1:" + columnName(spec.headers.length) + rows;
+  });
+  // Headers and records share each range. Date serials remain separate from formatted IDs.
+  const formatted = await batchValues(ranges);
+  const dated = active.map((spec, index) => ({ spec, index })).filter(({ spec }) => spec.dates?.length);
+  const numeric = await batchValues(dated.map(({ index }) => ranges[index]), true);
+  const numericByIndex = new Map(dated.map(({ index }, i) => [index, numeric[i]]));
+  const data: SheetData = Object.fromEntries(specs.map(spec => [spec.key, []]));
+  active.forEach((spec, i) => {
+    const raw = formatted[i].values || [];
+    if (!headersMatch(raw[0], spec.headers)) throw new GoogleSheetsConflictError('หัวตารางไม่ตรงกับโครงสร้างแอป');
+    const numericRows = numericByIndex.get(i)?.values?.slice(1) || [];
+    const byId = new Map(numericRows.map(row => [String(row[0] ?? ''), row]));
+    data[spec.key] = raw.slice(1).filter(row => row[0] != null && String(row[0]).trim() !== '').map(row => {
+      const source = byId.get(String(row[0]));
+      if (spec.dates?.length && !source) throw new GoogleSheetsConflictError('ข้อมูลเปลี่ยนระหว่างอ่าน กรุณาลองใหม่');
+      const values = spec.headers.map((_, index) => normalizeValue(
+        spec.dates?.includes(index) && typeof source?.[index] === 'number' ? source[index] : row[index],
+        index, spec, metadata.properties?.locale || 'th_TH', true));
+      return { id: String(values[0]), values };
+    });
+  });
+  return { data, metadata };
+}
+
+async function readCacheKey(): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(await getSpreadsheetId()));
+  return 'workbook_' + Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+async function invalidateReadCache(): Promise<void> {
+  await invalidateSharedSheetsCache(await readCacheKey());
+}
+async function cachedReadSnapshot(specs: SheetSpec[]) {
+  // The only cached entry is the full UI payload; mutation guards always read Sheets.
+  return sharedSheetsRead(await readCacheKey(), () => loadGoogleSheetsSnapshot(specs));
+}
+
+export async function loadGoogleSheetsData(specs: SheetSpec[]): Promise<SheetData> {
+  return (await loadGoogleSheetsSnapshot(specs)).data;
+}
+
+export async function loadGoogleSheetsPayload(specs: SheetSpec[]) {
+  const { data, metadata } = await cachedReadSnapshot(specs);
+  return {
+    ...data,
+    _meta: {
+      dateNormalization: 'google_serial_v1',
+      spreadsheetTitle: metadata.properties?.title || '',
+      spreadsheetLocale: metadata.properties?.locale || '',
+      spreadsheetTimeZone: metadata.properties?.timeZone || '',
+    },
+  };
 }
 
 export class GoogleSheetsConflictError extends Error {
@@ -531,11 +566,11 @@ async function createGoogleSheetsRecord(
   ];
   try {
     const token = await createAccessToken();
-    const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + ':batchUpdate', {
+    const response = await fetchWithQuotaRetry('https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(spreadsheetId) + ':batchUpdate', {
       method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ requests }),
     });
-    if (!response.ok) throw new GoogleSheetsFailure(classifyGoogleFailure(response.status), response.status, part + '_append_failed', 'write_api');
+    if (!response.ok) throw responseFailure(response, part + '_append_failed', 'write_api');
   } catch (cause) {
     // A response can be lost after commit. Read back this same stable ID; never
     // retry with a fresh ID or write to an existing row as a recovery action.
@@ -546,15 +581,15 @@ async function createGoogleSheetsRecord(
   return { record: { id, values: expected }, created: true, replayed: false };
 }
 
-export async function createGoogleSheetsContact(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+async function createGoogleSheetsContactUncached(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
   return createGoogleSheetsRecord(specs, 'contacts', receiptHash, values);
 }
 
-export async function createGoogleSheetsCustomer(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+async function createGoogleSheetsCustomerUncached(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
   return createGoogleSheetsRecord(specs, 'customers', receiptHash, values);
 }
 
-export async function createGoogleSheetsFinancial(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
+async function createGoogleSheetsFinancialUncached(specs: SheetSpec[], receiptHash: string, values: unknown[]) {
   return createGoogleSheetsRecord(specs, 'financials', receiptHash, values);
 }
 
@@ -595,7 +630,7 @@ async function googleBatchUpdate(body: {
   const token = await createAccessToken();
   let response: Response;
   try {
-    response = await fetch(
+    response = await fetchWithQuotaRetry(
       'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(await getSpreadsheetId()) + '/values:batchUpdate',
       {
         method: 'POST',
@@ -615,11 +650,11 @@ async function googleBatchUpdate(body: {
       const body = await response.json() as { error?: { status?: string; errors?: Array<{ reason?: string }> } };
       reason = body.error?.errors?.[0]?.reason || body.error?.status || '';
     } catch {}
-    throw new GoogleSheetsFailure(classifyGoogleFailure(response.status, reason), response.status, reason, 'write_api');
+    throw responseFailure(response, reason, 'write_api');
   }
 }
 
-export async function updateGoogleSheetsRecord(
+async function updateGoogleSheetsRecordUncached(
   specs: SheetSpec[],
   key: string,
   id: string,
@@ -700,7 +735,7 @@ export async function updateGoogleSheetsRecord(
   });
 }
 
-export async function deleteGoogleSheetsRecords(
+async function deleteGoogleSheetsRecordsUncached(
   specs: SheetSpec[],
   targets: Array<{ key: string; ids: string[] }>
 ): Promise<void> {
@@ -765,7 +800,7 @@ export async function deleteGoogleSheetsRecords(
   const token = await createAccessToken();
   let response: Response;
   try {
-    response = await fetch(
+    response = await fetchWithQuotaRetry(
       'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(await getSpreadsheetId()) + ':batchUpdate',
       {
         method: 'POST',
@@ -782,6 +817,33 @@ export async function deleteGoogleSheetsRecords(
       const body = await response.json() as { error?: { status?: string; errors?: Array<{ reason?: string }> } };
       reason = body.error?.errors?.[0]?.reason || body.error?.status || '';
     } catch {}
-    throw new GoogleSheetsFailure(classifyGoogleFailure(response.status, reason), response.status, reason, 'write_api');
+    throw responseFailure(response, reason, 'write_api');
   }
 }
+
+
+// Invalidation after a mutation also rejects any refresh started before it finished.
+async function withCacheInvalidation<T>(operation: () => Promise<T>): Promise<T> {
+  await invalidateReadCache();
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try { return await operation(); }
+      catch (cause) {
+        if (!(cause instanceof GoogleSheetsFailure) || cause.category !== 'quota_exceeded' || attempt >= 3 || (cause.retryAfterMs || 0) > 8000) throw cause;
+        // Repeat the whole operation so IDs, current row locations, headers and
+        // expected values are checked again before any write retry.
+        await new Promise(resolve => setTimeout(resolve, Math.max(1000 * 2 ** attempt + Math.floor(Math.random() * 1000), cause.retryAfterMs || 0)));
+      }
+    }
+  } finally { await invalidateReadCache(); }
+}
+export const createGoogleSheetsContact: typeof createGoogleSheetsContactUncached = (...args) =>
+  withCacheInvalidation(() => createGoogleSheetsContactUncached(...args));
+export const createGoogleSheetsCustomer: typeof createGoogleSheetsCustomerUncached = (...args) =>
+  withCacheInvalidation(() => createGoogleSheetsCustomerUncached(...args));
+export const createGoogleSheetsFinancial: typeof createGoogleSheetsFinancialUncached = (...args) =>
+  withCacheInvalidation(() => createGoogleSheetsFinancialUncached(...args));
+export const updateGoogleSheetsRecord: typeof updateGoogleSheetsRecordUncached = (...args) =>
+  withCacheInvalidation(() => updateGoogleSheetsRecordUncached(...args));
+export const deleteGoogleSheetsRecords: typeof deleteGoogleSheetsRecordsUncached = (...args) =>
+  withCacheInvalidation(() => deleteGoogleSheetsRecordsUncached(...args));

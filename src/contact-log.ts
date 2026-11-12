@@ -2,6 +2,41 @@ import { BUSINESS_QUESTIONS, businessData, emptyBusinessForm, mergeBusinessJson,
 import { schemas } from './schema.ts';
 
 export type ContactRow = { id: string; values: unknown[] };
+
+export const PHONE_CONTACT_OUTCOMES = ['รับสาย', 'เบอร์ผิด', 'ปิดเครื่อง', 'ไม่รับสาย'] as const;
+export const isPhoneContactOutcome = (value: string) =>
+  PHONE_CONTACT_OUTCOMES.some(outcome => outcome === value);
+export type PhoneContactForm = {
+  customerId: string;
+  caseId: string;
+  contactedAt: string;
+  channel: string;
+  outcome: string;
+  note: string;
+};
+
+export function emptyPhoneContactForm(context: { customerId?: string; caseId?: string } = {}): PhoneContactForm {
+  return {
+    customerId: context.customerId || '',
+    caseId: context.caseId || '',
+    contactedAt: bangkokDateTime(),
+    channel: 'โทรศัพท์',
+    outcome: '',
+    note: '',
+  };
+}
+
+export function phoneContactValues(form: PhoneContactForm, headers: readonly string[] = contactSpec.headers) {
+  const indexes = contactIndexes(headers);
+  const values: Array<string | null> = headers.map(() => null);
+  values[indexes.customerId] = form.customerId.trim() || null;
+  values[indexes.caseId] = form.caseId.trim() || null;
+  values[indexes.contactedAt] = form.contactedAt.trim() || null;
+  values[indexes.channel] = form.channel.trim() || null;
+  values[indexes.outcome] = form.outcome.trim() || null;
+  values[indexes.facts] = form.note || null;
+  return values;
+}
 export type ContactForm = BusinessForm & {
   customerId: string;
   caseId: string;
@@ -131,11 +166,11 @@ export function validateContactValues(values: unknown[], headers: readonly strin
   const indexes = contactIndexes(headers);
   const value = (key: keyof typeof indexes) => String(values[indexes[key]] ?? '').trim();
   if (values.some(item => typeof item === 'string' && item.length > 20000)) return 'ข้อความบางช่องยาวเกิน 20,000 ตัวอักษร';
-  for (const key of ['customerId', 'contactedAt', 'channel', 'outcome', 'facts'] as const) {
+  for (const key of ['customerId', 'contactedAt', 'channel', 'outcome'] as const) {
     if (!value(key)) return 'กรุณากรอก' + contactHeaders[key];
   }
   if (!isContactDateTime(value('contactedAt')) || (value('verifiedAt') && !isContactDateTime(value('verifiedAt')))) return 'กรุณาตรวจวันเวลาให้ถูกต้อง (เวลาไทย)';
-  for (const key of ['channel', 'outcome', 'verify'] as const) {
+  for (const key of ['verify'] as const) {
     const choices = contactSpec.options[String(indexes[key])];
     if (value(key) && !choices?.includes(value(key))) return 'ค่าของช่อง ' + contactHeaders[key] + ' ไม่อยู่ในรายการ';
   }
@@ -154,4 +189,5 @@ export function validateContactValues(values: unknown[], headers: readonly strin
   }
   return '';
 }
+
 

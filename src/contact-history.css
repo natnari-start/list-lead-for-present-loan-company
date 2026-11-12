@@ -1,0 +1,225 @@
+.contact-history-view {
+  min-width: 0;
+}
+.contact-company-summary {
+  margin: 0 0 6px;
+  color: #405168;
+  font-size: 14px;
+  font-weight: 600;
+}
+.contact-company-table {
+  min-width: 800px;
+}
+.contact-company-table td:first-child {
+  width: 30%;
+}
+.contact-company-table td > small {
+  display: block;
+  margin-top: 6px;
+  color: #68778a;
+  line-height: 1.6;
+}
+.contact-count-button {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
+  min-width: 88px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border: 1px solid #b9d0e7;
+  border-radius: 10px;
+  background: #edf5ff;
+  color: #164e82;
+}
+.contact-count-button strong {
+  font-size: 20px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.contact-count-button:hover {
+  background: #dfedfc;
+}
+.app-shell .contact-history-modal {
+  width: min(840px, 100%);
+  max-height: calc(100dvh - 40px);
+}
+.contact-history-modal .modal-head {
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.contact-history-modal .modal-head > div {
+  min-width: 0;
+}
+.contact-history-modal h2 {
+  overflow-wrap: anywhere;
+}
+.contact-history-modal .modal-head .small-note {
+  margin: 8px 0 0;
+}
+.contact-history-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: 18px 22px;
+}
+.contact-history-entry {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid #dce4ee;
+  border-radius: 12px;
+  background: #fff;
+}
+.contact-history-entry:last-child {
+  margin-bottom: 0;
+}
+.contact-history-entry > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.contact-history-entry h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.contact-history-entry > header > span {
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: #edf2f8;
+  font-size: 12px;
+}
+.contact-history-entry h4 {
+  margin: 14px 0 6px;
+  color: #405168;
+  font-size: 13px;
+}
+.contact-history-channel {
+  margin: 8px 0 0;
+  color: #68778a;
+  font-size: 13px;
+}
+.contact-history-facts,
+.contact-history-entry dd,
+.contact-history-entry pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.75;
+}
+.contact-history-entry pre {
+  max-width: 100%;
+  margin: 0;
+  font-size: 12px;
+}
+.contact-history-entry details {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.contact-history-entry summary {
+  min-height: 28px;
+  cursor: pointer;
+  color: #164e82;
+  font-size: 13px;
+}
+.contact-history-entry dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.contact-history-entry dt {
+  color: #68778a;
+  font-size: 12px;
+}
+.contact-history-entry dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+}
+.contact-history-footer {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.contact-history-footer nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-right: auto;
+  font-size: 12px;
+  color: #53657a;
+}
+@media (max-width: 780px) {
+  .contact-history-view .contact-company-table-wrap {
+    border: 0;
+    background: transparent;
+    overflow: visible;
+  }
+  .contact-company-table {
+    display: block;
+    min-width: 0;
+  }
+  .contact-company-table thead {
+    display: none;
+  }
+  .contact-company-table tbody {
+    display: grid;
+    gap: 12px;
+  }
+  .contact-company-table tr {
+    display: block;
+    overflow: hidden;
+    border: 1px solid #dce4ee;
+    border-radius: 12px;
+    background: #fff;
+  }
+  .workspace-layout .contact-company-table td {
+    display: grid;
+    grid-template-columns: 115px minmax(0, 1fr);
+    gap: 8px;
+    max-width: none;
+    width: 100%;
+    padding: 12px;
+  }
+  .contact-company-table td::before {
+    content: attr(data-label);
+    color: #68778a;
+    font-size: 12px;
+  }
+  .workspace-layout .contact-company-table td:first-child,
+  .workspace-layout .contact-company-table td.empty {
+    display: block;
+    background: #f4f8fd;
+  }
+  .contact-company-table td:first-child::before,
+  .contact-company-table td.empty::before {
+    display: none;
+  }
+  .contact-company-table td > small {
+    grid-column: 2;
+  }
+  .contact-history-modal .modal-head,
+  .contact-history-scroll {
+    padding: 14px;
+  }
+  .app-shell .contact-history-modal {
+    max-height: calc(100dvh - 16px);
+  }
+  .contact-history-entry {
+    padding: 12px;
+  }
+  .contact-history-entry > header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .contact-history-entry dl {
+    grid-template-columns: 1fr;
+  }
+  .contact-history-footer > .button {
+    width: 100%;
+  }
+}
+

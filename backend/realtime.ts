@@ -20,3 +20,4 @@ export const realtime = async (event: any) => {
 
   return { statusCode: 200 };
 };
+

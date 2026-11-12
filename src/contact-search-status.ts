@@ -24,3 +24,4 @@ export function contactSearchUpdate(
   values[index] = checked ? 'TRUE' : 'FALSE';
   return { values, expectedValues };
 }
+

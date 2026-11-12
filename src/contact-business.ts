@@ -87,3 +87,4 @@ export function validateBusinessJson(raw: string, full: boolean, callback: boole
     return '';
   } catch { return 'ข้อมูล JSON ไม่ถูกต้อง'; }
 }
+

@@ -126,3 +126,4 @@ export default function FinancialEditorDialog({ customer, companyName, rows, dis
     </form>
   </div>;
 }
+

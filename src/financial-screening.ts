@@ -179,3 +179,4 @@ export const criterionLabel = (status: CriterionStatus) => status === 'pass'
   : status === 'fail'
     ? 'ไม่ผ่าน'
     : 'ข้อมูลไม่ครบ';
+
