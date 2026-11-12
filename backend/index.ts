@@ -11,7 +11,7 @@ import { CONTACT_SEARCH_HEADER, isContactSearchValue } from '../src/contact-sear
 import { contactIndexes, validateContactValues } from '../src/contact-log';
 import { financialSchema, validateFinancialEntry } from '../src/financial-screening';
 import { createHash } from 'node:crypto';
-import { createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, deleteGoogleSheetsRecords, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, loadGoogleSheetsPayload, updateGoogleSheetsRecord } from './googleSheets';
+import { assertGoogleSheetsConfiguration, createGoogleSheetsContact, createGoogleSheetsCustomer, createGoogleSheetsFinancial, deleteGoogleSheetsRecords, describeGoogleSheetsFailure, GoogleSheetsConflictError, inspectGoogleSheets, loadGoogleSheetsData, loadGoogleSheetsPayload, updateGoogleSheetsRecord } from './googleSheets';
 
 type SheetSpec = {
   key: string;
@@ -39,7 +39,7 @@ const adminAllowlist: RouterMiddleware = async (ctx) => {
       ? parsed.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
       : typeof parsed === 'string' && parsed.trim() ? [parsed.trim()] : [];
   } catch {
-    return error('ยังไม่ได้ตั้งค่า ADMIN_EMAILS ใน AppDeploy secrets', 503);
+    return error('อ่านการตั้งค่า ADMIN_EMAILS ไม่สำเร็จ กรุณาลองใหม่', 503);
   }
   if (!allowedEmails.length) return error('ADMIN_EMAILS ไม่มีบัญชีผู้ดูแลที่ถูกต้อง', 503);
   const userEmail = ctx.user?.email?.trim().toLowerCase();
@@ -104,10 +104,7 @@ export const handler = router({
     ...auth,
     async () => {
       try {
-        const secretNames = await secrets.listSecretNames();
-        if (!secretNames.includes('GOOGLE_SERVICE_ACCOUNT_JSON') || !secretNames.includes('GOOGLE_SPREADSHEET_ID')) {
-          return json({ configured: false, connected: false });
-        }
+        await assertGoogleSheetsConfiguration();
         return json(await inspectGoogleSheets(SPECS));
       } catch (cause) {
         const failure = describeGoogleSheetsFailure(cause);
@@ -125,15 +122,12 @@ export const handler = router({
     ...auth,
     async () => {
       try {
-        const secretNames = await secrets.listSecretNames();
-        if (!secretNames.includes('GOOGLE_SERVICE_ACCOUNT_JSON') || !secretNames.includes('GOOGLE_SPREADSHEET_ID')) {
-          return error('ยังไม่ได้ตั้งค่า Google Sheets credential', 503);
-        }
+        await assertGoogleSheetsConfiguration();
         return json(await loadGoogleSheetsPayload(SPECS));
       } catch (cause) {
         const failure = describeGoogleSheetsFailure(cause);
         console.warn('google_sheets_data_load_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
-        return error(failure.message + ' ระบบไม่ได้แสดงข้อมูล Sandbox แทน', 502);
+        return error(failure.message + ' ระบบไม่ได้แสดงข้อมูล Sandbox แทน', failure.code === 'quota_exceeded' ? 429 : 502);
       }
     },
   ],
@@ -169,7 +163,7 @@ export const handler = router({
         } catch (cause) {
           if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
           const failure = describeGoogleSheetsFailure(cause);
-          return error('ยังยืนยันการบันทึกงบการเงินไม่ได้: ' + failure.message, failure.status === 403 ? 403 : 502);
+          return error('ยังยืนยันการบันทึกงบการเงินไม่ได้: ' + failure.message, failure.code === 'quota_exceeded' ? 429 : failure.status === 403 ? 403 : 502);
         }
       }
       if (payload.part === 'customers') {
@@ -194,7 +188,7 @@ export const handler = router({
         } catch (cause) {
           if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
           const failure = describeGoogleSheetsFailure(cause);
-          return error('ยังยืนยันการบันทึกลูกค้าไม่ได้ กรุณาตรวจสอบคำขอเดิมอีกครั้ง: ' + failure.message, failure.status === 403 ? 403 : 502);
+          return error('ยังยืนยันการบันทึกลูกค้าไม่ได้ กรุณาตรวจสอบคำขอเดิมอีกครั้ง: ' + failure.message, failure.code === 'quota_exceeded' ? 429 : failure.status === 403 ? 403 : 502);
         }
       }
       const invalid = validateContactValues(values, spec.headers);
@@ -216,7 +210,7 @@ export const handler = router({
       } catch (cause) {
         if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
         const failure = describeGoogleSheetsFailure(cause);
-        return error('ยังยืนยันการบันทึกไม่ได้ กรุณาตรวจสอบคำขอเดิมอีกครั้ง: ' + failure.message, failure.status === 403 ? 403 : 502);
+        return error('ยังยืนยันการบันทึกไม่ได้ กรุณาตรวจสอบคำขอเดิมอีกครั้ง: ' + failure.message, failure.code === 'quota_exceeded' ? 429 : failure.status === 403 ? 403 : 502);
       }
     },
   ],
@@ -333,7 +327,7 @@ export const handler = router({
         const message = failure.status === 403
           ? 'บันทึกไม่สำเร็จ: กรุณาตั้งสิทธิ์ service account เป็น Editor ใน Google Sheet'
           : failure.message;
-        return error(message, failure.status === 403 ? 403 : 502);
+        return error(message, failure.code === 'quota_exceeded' ? 429 : failure.status === 403 ? 403 : 502);
       }
     },
   ],
@@ -379,8 +373,9 @@ export const handler = router({
         if (cause instanceof GoogleSheetsConflictError) return error(cause.message, 409);
         const failure = describeGoogleSheetsFailure(cause);
         console.warn('google_sheets_delete_failed ' + failure.code + ' ' + (failure.stage || 'unknown') + ' ' + (failure.status || 0) + ' ' + (failure.reason || ''));
-        return error('ลบบริษัทไม่สำเร็จ: ' + failure.message, failure.status === 403 ? 403 : 502);
+        return error('ลบบริษัทไม่สำเร็จ: ' + failure.message, failure.code === 'quota_exceeded' ? 429 : failure.status === 403 ? 403 : 502);
       }
     },
   ],
 });
+

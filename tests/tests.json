@@ -122,16 +122,19 @@
       "user-visible source error",
       "date verification fail-closed",
       "no silent Sandbox fallback",
-      "source retry UI"
+      "source retry UI",
+      "quota error separation",
+      "authentication independent of Sheets",
+      "reconnect button"
     ],
     "description": "Verifies failed source loading remains explicit in the revised layout and does not replace real data with demo records.",
     "qa_faults": [
       {
         "method": "GET",
         "path": "/api/data",
-        "status": 502,
+        "status": 429,
         "body_json": {
-          "error": "simulated_google_sheets_failure"
+          "error": "Google Sheets เกินโควตาการเรียกใช้งาน กรุณารอประมาณหนึ่งนาทีแล้วลองเชื่อมต่อใหม่"
         }
       }
     ],
@@ -139,9 +142,10 @@
       "Sign in using the authorized account and wait for the injected source failure.",
       "Confirm a source-error message is visible in the workspace.",
       "Open งานติดตาม and confirm a source error is shown instead of operational current totals.",
-      "Return to ทะเบียนลูกค้า and confirm a visible retry or refresh control is available. Do not write any records."
+      "Return to ทะเบียนลูกค้า and confirm a visible retry or refresh control is available. Do not write any records.",
+      "Verify the workspace remains signed in and shows ลองเชื่อมต่อใหม่. Click reconnect once; the quota error stays visible if the injected fault remains. Do not modify Google Sheets."
     ],
-    "expected": "Source failure remains visible, dates stay unverified, and no Sandbox records or current task totals replace the failed response."
+    "expected": "Source failure remains visible, dates stay unverified, and no Sandbox records or current task totals replace the failed response. The session remains signed in and retry is available; no Sandbox records appear."
   },
   {
     "name": "Signed-out users cannot enter the protected workspace",

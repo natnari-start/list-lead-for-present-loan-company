@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth } from '@appdeploy/client';
 import {
   Users, Phone, CalendarCheck, BriefcaseBusiness, Files, RefreshCw, Search,
@@ -174,7 +174,11 @@ export default function App() {
     };
   }, [selectedCustomer, deleteTarget, deletingCustomerId]);
 
+  const loadInFlight = useRef(false);
+  const saveInFlight = useRef(false);
   const load = async () => {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
     setLoading(true);
     setError('');
     setDataLoadError('');
@@ -182,6 +186,8 @@ export default function App() {
       const response = await api.get('/api/data');
       const next = response.data as Data;
       setData(next);
+      setSheetStatus('connected');
+      setSheetMessage('');
       setDatesVerified(next._meta?.dateNormalization === 'google_serial_v1');
       setDataLoaded(true);
       setDataFetchedAt(new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' }).format(new Date()));
@@ -189,8 +195,11 @@ export default function App() {
       const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(responseMessage || (cause instanceof Error ? cause.message : 'โหลดข้อมูลไม่สำเร็จ'));
       setDataLoadError(responseMessage || 'โหลดข้อมูลไม่สำเร็จ');
+      setSheetStatus('error');
+      setSheetMessage(responseMessage || 'โหลดข้อมูลไม่สำเร็จ');
       setDatesVerified(false);
     } finally {
+      loadInFlight.current = false;
       setLoading(false);
     }
   };
@@ -203,9 +212,10 @@ export default function App() {
         try {
           await api.get('/api/session');
           setUser(current);
-        } catch {
-          await auth.signOut();
-          setError('ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาตรวจการตั้งค่าผู้ดูแล');
+        } catch (cause) {
+          const status = (cause as { response?: { status?: number } })?.response?.status;
+          if (status === 401 || status === 403) await auth.signOut();
+          setError('ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองใหม่ หรือตรวจการตั้งค่าผู้ดูแล');
         }
       })
       .catch(() => setError('เข้าสู่ระบบไม่สำเร็จ'));
@@ -213,31 +223,6 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     void load();
-    api
-      .get('/api/integration/google-sheets/status')
-      .then(response => {
-        const status = response.data as {
-          connected?: boolean;
-          errorCode?: string;
-          errorMessage?: string;
-          checkedSheets?: Array<{ headersMatch: boolean }>;
-        };
-        const headersMismatch = status.checkedSheets?.some(sheet => !sheet.headersMatch);
-        setSheetStatus(
-          status.connected
-            ? 'connected'
-            : status.errorCode
-              ? 'error'
-              : headersMismatch
-                ? 'mismatch'
-                : 'error'
-        );
-        setSheetMessage(status.errorMessage || '');
-      })
-      .catch(() => {
-        setSheetStatus('error');
-        setSheetMessage('ตรวจสอบสถานะ Google Sheets ไม่สำเร็จ');
-      });
   }, [user]);
 
   const spec = specs.find(item => item.key === part)!;
@@ -504,8 +489,9 @@ export default function App() {
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (!record) return;
+    if (!record || saveInFlight.current) return;
     if (!window.confirm('ยืนยันบันทึกการแก้ไขลง Google Sheets จริง?')) return;
+    saveInFlight.current = true;
     setLoading(true);
     setError('');
     setNotice('');
@@ -529,6 +515,7 @@ export default function App() {
       const responseMessage = (cause as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(responseMessage || (cause instanceof Error ? cause.message : 'บันทึกไม่สำเร็จ'));
     } finally {
+      saveInFlight.current = false;
       setLoading(false);
     }
   }
@@ -696,6 +683,10 @@ export default function App() {
           </div>
         </aside>
       <main className="main" id="workspace-content" tabIndex={-1}>
+        {dataLoadError && <div role="alert" className="error-banner">
+          {dataLoadError} <button type="button" disabled={loading} onClick={() => void load()}>ลองเชื่อมต่อใหม่</button>
+          <span> ร่างที่กรอกยังอยู่ หากยังไม่ยืนยันการบันทึก ให้ตรวจรายการล่าสุดก่อนกดซ้ำ</span>
+        </div>}
         <section className="heading">
           <div>
             <p className="eyebrow">SME FREEDOM DESK</p>
@@ -1060,7 +1051,7 @@ export default function App() {
               <p className="small-note">{part === 'customers'
                 ? 'การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets'
                 : 'การบันทึกจะเปลี่ยนข้อมูลจริงใน Google Sheets · รหัสรายการและช่องคำนวณอัตโนมัติแก้ไขไม่ได้'}</p>
-              {error && <div className="error-banner">{error}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
+              {error && <div className="error-banner">{error}{dataLoadError && <button type="button" disabled={loading} onClick={() => void load()}>ลองเชื่อมต่อใหม่</button>}<button type="button" onClick={() => setError('')}>ปิด</button></div>}
               <div className="form-grid">
                 {spec.headers.map((header, index) => {
                   if (part === 'customers' && (index === 0 || header === 'ชื่อเรียก / ชื่อร้าน')) return null;
@@ -1268,4 +1259,5 @@ function Stat({ label, value }: { label: string; value: string | number }) {
     </article>
   );
 }
+
 
